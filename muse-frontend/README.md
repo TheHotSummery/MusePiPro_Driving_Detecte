@@ -1,17 +1,17 @@
 # Muse Pi Pro Plus 前端系统
 
-基于 Vue 3 + Element Plus 的疲劳驾驶检测系统前端界面。
+基于 Vue 3 + Element Plus 的硬件端疲劳驾驶检测系统前端界面。
 
 ## 项目特性
 
-- 🚀 **Vue 3** - 使用最新的 Vue 3 Composition API
-- 🎨 **Element Plus** - 现代化的 UI 组件库
-- 📦 **Pinia** - 轻量级状态管理
-- 🔄 **WebSocket** - 实时数据通信
-- 📱 **响应式设计** - 支持桌面端和移动端
-- 🎯 **TypeScript 支持** - 类型安全（可选）
+- **Vue 3** - 使用最新的 Vue 3 Composition API
+- **Element Plus** - 现代化的 UI 组件库
+- **Pinia** - 轻量级状态管理
+- **WebSocket** - 实时数据通信
+- **响应式设计** - 支持桌面端和移动端
+- **TypeScript 支持** - 类型安全（可选）
 
-## 技术栈
+## 主要包
 
 - **框架**: Vue 3.5.18
 - **UI库**: Element Plus 2.11.1
@@ -20,9 +20,9 @@
 - **HTTP客户端**: Axios 1.11.0
 - **WebSocket**: Socket.IO Client 4.8.1
 - **构建工具**: Vite 7.0.6
-- **样式**: SCSS
+- **样式文件**: SCSS
 
-## 项目结构
+## 项目结构（2025-9-8生成）
 
 ```
 muse-frontend/
@@ -61,7 +61,6 @@ muse-frontend/
 - MJPEG视频流显示
 - 视频连接状态监控
 - 自动重连机制
-- 错误处理和占位图显示
 
 ### 2. 检测结果展示
 - 实时行为检测框和标签
@@ -74,7 +73,6 @@ muse-frontend/
 - 进度评分动态显示
 - 分心次数统计
 - CPU使用率监控
-- FPS显示
 
 ### 4. 事件记录
 - 实时事件列表
@@ -103,29 +101,21 @@ muse-frontend/
 ### 安装依赖
 ```bash
 npm install
-# 或
-yarn install
 ```
 
 ### 开发模式
 ```bash
 npm run dev
-# 或
-yarn dev
 ```
 
 ### 构建生产版本
 ```bash
 npm run build
-# 或
-yarn build
 ```
 
 ### 预览生产版本
 ```bash
 npm run preview
-# 或
-yarn preview
 ```
 
 ## 配置说明
@@ -185,60 +175,6 @@ yarn preview
 - 权重配置
 - 默认值管理
 
-## 响应式设计
-
-支持多种屏幕尺寸：
-- 桌面端 (1920x1080)
-- 平板端 (1024x768)
-- 移动端 (375x667)
-
-## 浏览器兼容性
-
-- Chrome >= 88
-- Firefox >= 85
-- Safari >= 14
-- Edge >= 88
-
-## 开发规范
-
-### 代码规范
-- 使用 ESLint + Prettier
-- 遵循 Vue 3 最佳实践
-- 组件命名使用 PascalCase
-- 文件命名使用 kebab-case
-
-### 性能优化
-- 组件懒加载
-- 图片懒加载
-- 虚拟滚动（大数据列表）
-- 防抖和节流
-
-## 故障排除
-
-### 常见问题
-
-1. **WebSocket连接失败**
-   - 检查后端服务是否启动
-   - 确认端口号是否正确
-   - 检查防火墙设置
-
-2. **视频流无法显示**
-   - 检查视频流地址是否正确
-   - 确认后端视频服务是否正常
-   - 查看浏览器控制台错误信息
-
-3. **样式显示异常**
-   - 清除浏览器缓存
-   - 检查CSS文件是否正确加载
-   - 确认Element Plus版本兼容性
-
-## 更新日志
-
-### v1.0.0 (2024-01-XX)
-- 初始版本发布
-- 实现所有核心功能
-- 支持响应式设计
-- 完整的WebSocket通信
 
 ## 许可证
 
@@ -250,4 +186,4 @@ MIT License
 
 ## 联系方式
 
-如有问题，请联系开发团队。
+如有问题，请联系我们。
