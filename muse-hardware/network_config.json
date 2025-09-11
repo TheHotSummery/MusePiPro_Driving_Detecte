@@ -1,0 +1,33 @@
+{
+  "server": {
+    "base_url": "http://spacemit.topcoder.fun",
+    "timeout": 30
+  },
+  "device": {
+    "device_id": "A8888",
+    "device_type": "Muse Pi Pro Plus",
+    "version": "1.0.0",
+    "username": "testuser",
+    "password": "testpassword"
+  },
+  "serial": {
+    "port": "/dev/ttyUSB0",
+    "baudrate": 115200,
+    "apn": "UNINET"
+  },
+  "timing": {
+    "heartbeat_interval": 240,
+    "gps_interval": 120,
+    "event_cooldown": 10,
+    "retry_interval": 30
+  },
+  "default_data": {
+    "latitude": 33.553733,
+    "longitude": 119.030953,
+    "fatigue_score": 0.85,
+    "eye_blink_rate": 0.45,
+    "head_movement_score": 0.32,
+    "yawn_count": 2,
+    "attention_score": 0.78
+  }
+}
