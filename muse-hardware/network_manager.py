@@ -30,6 +30,7 @@ class NetworkManager:
         self.token_expire_time = 0
         self.is_initialized = False
         self.is_network_test_running = False  # 防重复点击标志
+        self.offline_mode = False  # 离线模式标志
         
         # 状态管理
         self.last_gps_location = None
@@ -56,6 +57,18 @@ class NetworkManager:
         self._start_scheduled_tasks()
         
         logging.info("NetworkManager 初始化完成")
+    
+    def set_offline_mode(self, enabled=True):
+        """设置离线模式"""
+        self.offline_mode = enabled
+        if enabled:
+            logging.info("网络管理器已设置为离线模式，所有数据将仅本地缓存")
+        else:
+            logging.info("网络管理器已退出离线模式")
+    
+    def is_offline_mode(self):
+        """检查是否处于离线模式"""
+        return self.offline_mode
     
     def _load_config(self, config_path):
         """加载配置文件"""
@@ -246,6 +259,12 @@ class NetworkManager:
     
     def get_gps_location(self):
         """获取GPS坐标"""
+        # 如果处于离线模式，返回默认坐标
+        if self.offline_mode:
+            lat = self.config["default_data"]["latitude"]
+            lng = self.config["default_data"]["longitude"]
+            return False, f"离线模式：使用默认GPS坐标: {lat:.6f}, {lng:.6f}", None
+        
         if not self.is_initialized or not self.module:
             return False, "模块未初始化", None
         
@@ -334,13 +353,28 @@ class NetworkManager:
     
     def _api_call(self, method, endpoint, data=None, friendly_name="API调用"):
         """通用API调用方法"""
+        # 如果处于离线模式，直接缓存数据
+        if self.offline_mode:
+            if data:
+                self._add_to_offline_queue(friendly_name, data)
+                logging.info(f"离线模式：{friendly_name}数据已缓存")
+            return False, f"离线模式：{friendly_name}数据已缓存"
+        
         if not self.is_initialized or not self.module:
-            return False, f"{friendly_name}失败: 模块未初始化"
+            # 模块未初始化时也缓存数据
+            if data:
+                self._add_to_offline_queue(friendly_name, data)
+                logging.info(f"模块未初始化：{friendly_name}数据已缓存")
+            return False, f"{friendly_name}失败: 模块未初始化，数据已缓存"
         
         if not self._check_token_validity():
             success, message = self.device_login()
             if not success:
-                return False, f"{friendly_name}失败: {message}"
+                # 登录失败时也缓存数据
+                if data:
+                    self._add_to_offline_queue(friendly_name, data)
+                    logging.info(f"登录失败：{friendly_name}数据已缓存")
+                return False, f"{friendly_name}失败: {message}，数据已缓存"
         
         try:
             url = f"{self.config['server']['base_url']}{endpoint}?token={self.token}"
@@ -357,18 +391,18 @@ class NetworkManager:
                 parsed_json = json.loads(json_str)
                 
                 if parsed_json.get("code") == 200:
-                    logging.info(f"✅ {friendly_name}成功")
+                    logging.info(f" {friendly_name}成功")
                     return True, f"{friendly_name}成功"
                 elif parsed_json.get("code") == 401:
                     # Token无效，重新登录
                     self.token = None
-                    logging.warning("🔑 Token无效，需要重新登录")
+                    logging.warning(" Token无效，需要重新登录")
                     return False, "Token无效，需要重新登录"
                 else:
-                    logging.warning(f"❌ {friendly_name}失败: {parsed_json.get('message', '未知错误')}")
+                    logging.warning(f" {friendly_name}失败: {parsed_json.get('message', '未知错误')}")
                     return False, f"{friendly_name}失败: {parsed_json.get('message', '未知错误')}"
             else:
-                logging.warning(f"❌ {friendly_name}失败: 响应格式错误")
+                logging.warning(f" {friendly_name}失败: 响应格式错误")
                 return False, f"{friendly_name}失败: 响应格式错误"
                 
         except Exception as e:
@@ -571,7 +605,8 @@ class NetworkManager:
             "gnss_enabled": self.module.gnss_is_on if self.module else False,
             "last_gps_location": self.last_gps_location,
             "offline_queue_size": len(self.offline_queue),
-            "current_time": datetime.now().isoformat()
+            "current_time": datetime.now().isoformat(),
+            "offline_mode": self.offline_mode
         }
         
         if self.module and hasattr(self.module, 'get_accurate_timestamp'):
@@ -609,6 +644,10 @@ class NetworkManager:
     def _scheduled_heartbeat(self):
         """定时心跳任务"""
         try:
+            if self.offline_mode:
+                logging.debug("跳过定时心跳：离线模式")
+                return
+            
             if self.is_initialized and self._check_token_validity():
                 success, message = self.send_heartbeat()
                 if success:
@@ -623,6 +662,10 @@ class NetworkManager:
     def _scheduled_gps_update(self):
         """定时GPS更新任务"""
         try:
+            if self.offline_mode:
+                logging.debug("跳过定时GPS更新：离线模式")
+                return
+            
             if self.is_initialized:
                 success, message, location = self.get_gps_location()
                 if success:
@@ -637,6 +680,10 @@ class NetworkManager:
     def _scheduled_retry_offline(self):
         """定时重发离线数据任务"""
         try:
+            if self.offline_mode:
+                logging.debug("跳过定时重发离线数据：离线模式")
+                return
+            
             if self.is_initialized and self._check_token_validity() and self.offline_queue:
                 self._retry_offline_data()
         except Exception as e:
@@ -709,10 +756,10 @@ class NetworkManager:
             success, message = self.report_event_data(behavior_data)
             if success:
                 self.last_event_time = current_time
-                logging.info("✅ 事件上报成功")
+                logging.info(" 事件上报成功")
                 return True
             else:
-                logging.warning(f"❌ 事件上报失败: {message}")
+                logging.warning(f" 事件上报失败: {message}")
                 return False
                 
         except Exception as e:
@@ -732,10 +779,10 @@ class NetworkManager:
             success, message = self.report_gps_data(fatigue_data)
             if success:
                 self.last_data_report_time = current_time
-                logging.info("✅ GPS数据上报成功")
+                logging.info(" GPS数据上报成功")
                 return True
             else:
-                logging.warning(f"❌ GPS数据上报失败: {message}")
+                logging.warning(f" GPS数据上报失败: {message}")
                 return False
                 
         except Exception as e:

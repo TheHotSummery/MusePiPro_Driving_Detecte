@@ -4,24 +4,24 @@
 const config = {
   // 开发环境配置
   development: {
-    API_BASE_URL: '',
-    WS_URL: '',
+    API_BASE_URL: 'http://192.168.110.31:5200',
+    WS_URL: 'ws://192.168.110.31:5200',
     VIDEO_URL: '/feed/webcam/',
     IMAGE_URL: '/feed/image/'
   },
   
   // 生产环境配置
   production: {
-    API_BASE_URL: '',
-    WS_URL: '',
+    API_BASE_URL: 'http://192.168.110.31:5200',
+    WS_URL: 'ws://192.168.110.31:5200',
     VIDEO_URL: '/feed/webcam/',
     IMAGE_URL: '/feed/image/'
   },
   
   // 本地测试配置
   local: {
-    API_BASE_URL: 'http://localhost:5200',
-    WS_URL: 'ws://localhost:5200',
+    API_BASE_URL: 'http://192.168.110.31:5200',
+    WS_URL: 'ws://192.168.110.31:5200',
     VIDEO_URL: '/feed/webcam/',
     IMAGE_URL: '/feed/image/'
   }

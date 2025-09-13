@@ -62,7 +62,7 @@ class GPIOController:
                 time.sleep(0.5)
                 self.led.off()
                 time.sleep(0.5)
-            logging.info("🚨 一级警报触发：LED闪烁（GPIO70）")
+            logging.info(" 一级警报触发：LED闪烁（GPIO70）")
         except Exception as e:
             logging.error(f"GPIO70 触发失败: {e}")
     
@@ -88,7 +88,7 @@ class GPIOController:
                 time.sleep(0.5)
                 self.vibrator.off()
                 time.sleep(0.5)
-            logging.info("🚨 二级警报触发：LED闪烁+振动马达间歇性震动（GPIO70+71）")
+            logging.info(" 二级警报触发：LED闪烁+振动马达间歇性震动（GPIO70+71）")
         except Exception as e:
             logging.error(f"GPIO71 触发失败: {e}")
     
@@ -121,7 +121,7 @@ class GPIOController:
             
             # 关闭蜂鸣器
             self.buzzer.off()
-            logging.info("🚨 三级警报触发：蜂鸣器常响+LED闪烁+振动马达间歇性震动（GPIO70+71+72）")
+            logging.info(" 三级警报触发：蜂鸣器常响+LED闪烁+振动马达间歇性震动（GPIO70+71+72）")
         except Exception as e:
             logging.error(f"GPIO72 触发失败: {e}")
     

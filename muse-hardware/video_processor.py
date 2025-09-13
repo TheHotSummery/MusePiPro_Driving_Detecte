@@ -18,11 +18,12 @@ from behavior_analyzer import BehaviorAnalyzer
 class VideoProcessor:
     """视频处理器类"""
     
-    def __init__(self, gpio_controller, socketio):
+    def __init__(self, gpio_controller, socketio, network_manager=None):
         self.gpio_controller = gpio_controller
         self.socketio = socketio
+        self.network_manager = network_manager
         self.model_manager = None  # 延迟初始化
-        self.behavior_analyzer = BehaviorAnalyzer(gpio_controller, socketio)
+        self.behavior_analyzer = BehaviorAnalyzer(gpio_controller, socketio, network_manager)
         
         # 处理状态
         self.processing_thread_running = False
@@ -33,6 +34,9 @@ class VideoProcessor:
         # 性能统计
         self.frame_count = 0
         self.last_progress_update = time.time()
+        self.fps_counter = 0
+        self.fps_start_time = time.time()
+        self.current_fps = 0.0
     
     def start_processing_thread(self, source="webcam", device_index=20, image_path=None):
         """启动处理线程"""
@@ -109,6 +113,7 @@ class VideoProcessor:
                         time.sleep(0.1)
                         continue
                     self.frame_count += 1
+                    self.fps_counter += 1
                 
                 try:
                     # 预处理
@@ -171,9 +176,14 @@ class VideoProcessor:
                         )
                         last_socketio_emit = current_time
                     
-                    # 更新进度
+                    # 更新进度和FPS
                     if current_time - self.last_progress_update >= 1.0:
                         self.last_progress_update = current_time
+                        # 计算FPS
+                        if self.fps_counter > 0:
+                            self.current_fps = self.fps_counter / (current_time - self.fps_start_time)
+                            self.fps_counter = 0
+                            self.fps_start_time = current_time
                     
                     # 控制帧率
                     time_spent = time.time() - loop_start
@@ -220,7 +230,8 @@ class VideoProcessor:
                 "distracted_count": distracted_count,
                 "cpu_usage": psutil.cpu_percent(interval=None),
                 "progress": progress_score,
-                "level": level
+                "level": level,
+                "fps": self.current_fps
             })
             emit_time = (time.time() - start_emit) * 1000
             logging.debug(f"SocketIO 传输时间: {emit_time:.2f} ms")

@@ -9,6 +9,7 @@ import logging
 import threading
 from flask import Flask, Response, render_template, request
 from flask_socketio import SocketIO, emit
+from flask_cors import CORS
 from config import WEB_CONFIG, CONFIG, BEHAVIOR_WEIGHTS
 from gpio_controller import GPIOController
 from video_processor import VideoProcessor
@@ -22,6 +23,18 @@ class WebServer:
                         template_folder='templates',
                         static_folder='templates',  # 将静态文件目录设置为templates
                         static_url_path='')  # 静态文件URL路径设为根路径
+        
+        # 配置CORS，允许所有来源
+        CORS(self.app, resources={
+            r"/test/*": {"origins": "*"},
+            r"/feed/*": {"origins": "*"},
+            r"/status": {"origins": "*"},
+            r"/config": {"origins": "*"},
+            r"/weights": {"origins": "*"},
+            r"/clear_events": {"origins": "*"},
+            r"/trigger_gpio": {"origins": "*"}
+        })
+        
         # 优化SocketIO配置，提高启动速度
         self.socketio = SocketIO(
             self.app, 
@@ -35,8 +48,8 @@ class WebServer:
         
         # 初始化组件
         self.gpio_controller = GPIOController()
-        self.video_processor = VideoProcessor(self.gpio_controller, self.socketio)
         self.network_manager = NetworkManager()
+        self.video_processor = VideoProcessor(self.gpio_controller, self.socketio, self.network_manager)
         
         # 设置路由
         self._setup_routes()
@@ -103,6 +116,85 @@ class WebServer:
                     time.sleep(0.1)
             
             return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
+        
+        # 测试相关API接口
+        @self.app.route("/test/fatigue_state", methods=["POST"])
+        def set_test_fatigue_state():
+            try:
+                # 检查模块初始化状态
+                if not self._check_modules_initialized():
+                    return {"success": False, "message": "模块未完全初始化，无法设置测试状态"}, 503
+                
+                data = request.get_json()
+                score = data.get("score", 0)
+                behaviors = data.get("behaviors", [])
+                is_test_mode = data.get("is_test_mode", False)
+                
+                # 设置测试模式状态
+                behavior_analyzer = self.video_processor.get_behavior_analyzer()
+                behavior_analyzer.set_test_mode(is_test_mode, score, behaviors)
+                
+                # 发送更新到前端
+                self.socketio.emit("detection_update", {
+                    "progress": score,
+                    "level": behavior_analyzer.get_current_level(),
+                    "is_fatigue": score >= 75,
+                    "is_distracted": score >= 50 and score < 75,
+                    "test_mode": True
+                })
+                
+                logging.info(f"测试疲劳状态已设置: 分数={score}, 行为={behaviors}")
+                return {"success": True, "message": "测试疲劳状态设置成功"}
+                
+            except Exception as e:
+                logging.error(f"设置测试疲劳状态失败: {e}")
+                return {"success": False, "message": f"设置失败: {str(e)}"}, 500
+        
+        @self.app.route("/test/reset_fatigue_state", methods=["POST"])
+        def reset_test_fatigue_state():
+            try:
+                behavior_analyzer = self.video_processor.get_behavior_analyzer()
+                behavior_analyzer.reset_test_mode()
+                
+                # 发送重置更新到前端
+                self.socketio.emit("detection_update", {
+                    "progress": 0,
+                    "level": "Normal",
+                    "is_fatigue": False,
+                    "is_distracted": False,
+                    "test_mode": False
+                })
+                
+                logging.info("测试疲劳状态已重置")
+                return {"success": True, "message": "测试疲劳状态重置成功"}
+                
+            except Exception as e:
+                logging.error(f"重置测试疲劳状态失败: {e}")
+                return {"success": False, "message": f"重置失败: {str(e)}"}, 500
+        
+        @self.app.route("/test/simulate_fatigue_event", methods=["POST"])
+        def simulate_fatigue_event():
+            try:
+                # 检查模块初始化状态
+                if not self._check_modules_initialized():
+                    return {"success": False, "message": "模块未完全初始化，无法模拟疲劳事件"}, 503
+                
+                data = request.get_json()
+                behavior = data.get("behavior", "eyes_closed")
+                confidence = data.get("confidence", 0.85)
+                duration = data.get("duration", 3.0)
+                score = data.get("score", 75)
+                
+                # 更新测试行为
+                behavior_analyzer = self.video_processor.get_behavior_analyzer()
+                behavior_analyzer.update_test_behavior([behavior])
+                
+                logging.info(f"疲劳事件模拟完成: 行为={behavior}, 分数={score}")
+                return {"success": True, "message": "疲劳事件模拟成功"}
+                
+            except Exception as e:
+                logging.error(f"模拟疲劳事件失败: {e}")
+                return {"success": False, "message": f"模拟失败: {str(e)}"}, 500
     
     def _setup_socketio_events(self):
         """设置SocketIO事件处理器"""
@@ -301,6 +393,43 @@ class WebServer:
             logging.error(f"网络测试 {test_type} 执行失败: {e}")
         
         return result
+    
+    def _check_modules_initialized(self):
+        """检查模块是否已完全初始化"""
+        try:
+            # 检查视频处理器
+            if not self.video_processor:
+                logging.warning("视频处理器未初始化")
+                return False
+            
+            # 检查行为分析器
+            behavior_analyzer = self.video_processor.get_behavior_analyzer()
+            if not behavior_analyzer:
+                logging.warning("行为分析器未初始化")
+                return False
+            
+            # 检查GPIO控制器
+            if not self.gpio_controller:
+                logging.warning("GPIO控制器未初始化")
+                return False
+            
+            # 检查网络管理器
+            if not self.network_manager:
+                logging.warning("网络管理器未初始化")
+                return False
+            
+            # 检查模型管理器（如果视频处理器正在处理）
+            if self.video_processor.is_processing():
+                model_manager = self.video_processor.get_model_manager()
+                if not model_manager or not model_manager.is_loaded():
+                    logging.warning("模型管理器未加载")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"模块初始化检查失败: {e}")
+            return False
     
     def _get_current_behavior_data(self):
         """获取当前行为检测数据"""

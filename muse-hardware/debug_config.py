@@ -34,49 +34,49 @@ def setup_debug_logging():
     # 启用我们关心的模块的调试日志
     logging.getLogger('__main__').setLevel(logging.DEBUG)
     
-    print("🔍 调试日志已启用")
-    print("📝 调试日志将同时输出到控制台和 debug_log.txt 文件")
-    print("⚠️  注意：调试模式会显著增加日志输出量，仅用于开发阶段")
+    print(" 调试日志已启用")
+    print(" 调试日志将同时输出到控制台和 debug_log.txt 文件")
+    print("  注意：调试模式会显著增加日志输出量，仅用于开发阶段")
 
 def log_function_entry(func_name, **kwargs):
     """记录函数进入"""
-    logging.debug(f"🚀 进入函数: {func_name}")
+    logging.debug(f" 进入函数: {func_name}")
     if kwargs:
         for key, value in kwargs.items():
-            logging.debug(f"   📋 {key}: {value}")
+            logging.debug(f"    {key}: {value}")
 
 def log_function_exit(func_name, result=None):
     """记录函数退出"""
     if result is not None:
-        logging.debug(f"✅ 退出函数: {func_name}, 结果: {result}")
+        logging.debug(f" 退出函数: {func_name}, 结果: {result}")
     else:
-        logging.debug(f"✅ 退出函数: {func_name}")
+        logging.debug(f" 退出函数: {func_name}")
 
 def log_error_with_context(error, context=None):
     """记录带上下文的错误"""
     import traceback
     error_traceback = traceback.format_exc()
     
-    logging.error(f"❌ 错误: {error}")
-    logging.error(f"📍 错误堆栈: {error_traceback}")
+    logging.error(f" 错误: {error}")
+    logging.error(f" 错误堆栈: {error_traceback}")
     
     if context:
-        logging.error(f"🔍 错误上下文: {context}")
+        logging.error(f" 错误上下文: {context}")
 
 def log_detection_info(detections, stage=""):
     """记录检测信息的调试日志"""
     if detections:
-        logging.debug(f"🎯 {stage}检测结果: 数量={len(detections)}")
+        logging.debug(f" {stage}检测结果: 数量={len(detections)}")
         for i, detection in enumerate(detections):
             logging.debug(f"   [{i}] {detection.get('label', 'unknown')}: {detection.get('confidence', 0):.3f}")
     else:
-        logging.debug(f"🎯 {stage}检测结果: 无检测")
+        logging.debug(f" {stage}检测结果: 无检测")
 
 def log_performance_metrics(metrics):
     """记录性能指标的调试日志"""
-    logging.debug("⚡ 性能指标:")
+    logging.debug(" 性能指标:")
     for key, value in metrics.items():
-        logging.debug(f"   📊 {key}: {value}")
+        logging.debug(f"    {key}: {value}")
 
 # 装饰器：自动记录函数调用
 def debug_log(func):

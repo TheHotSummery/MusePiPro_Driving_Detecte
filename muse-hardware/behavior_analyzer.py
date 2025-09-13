@@ -17,9 +17,10 @@ from config import (
 class BehaviorAnalyzer:
     """行为分析器类"""
     
-    def __init__(self, gpio_controller, socketio):
+    def __init__(self, gpio_controller, socketio, network_manager=None):
         self.gpio_controller = gpio_controller
         self.socketio = socketio
+        self.network_manager = network_manager
         
         # 行为追踪状态
         self.behavior_tracker = {}
@@ -37,6 +38,14 @@ class BehaviorAnalyzer:
         # 进度评分
         self.progress_score = 0.0
         self.current_level = "Normal"
+        
+        # 测试模式状态
+        self.is_test_mode = False
+        self.test_score = 0.0
+        self.test_behaviors = []
+        self.test_mode_start_time = 0.0
+        self.last_test_behavior_time = 0.0
+        self.test_behavior_duration = 0.0
     
     def check_fatigue_or_distracted(self, detections, current_time):
         """检查疲劳或分心状态"""
@@ -45,6 +54,10 @@ class BehaviorAnalyzer:
             is_fatigue = False
             is_distracted = False
             new_events = []
+            
+            # 如果是测试模式，使用测试逻辑但保持正常的分数回退机制
+            if self.is_test_mode:
+                return self._handle_test_mode_logic(current_time)
             
             # 存储当前检测结果用于清醒驾驶检测
             self._current_detections = detections
@@ -201,14 +214,28 @@ class BehaviorAnalyzer:
             threading.Thread(target=self.gpio_controller.trigger_level3_alert, daemon=True).start()
             self.socketio.emit("level_update", {"level": "Level 3", "progress": self.progress_score})
             logging.info("触发三级警报")
+            
+            # 触发网络上报
+            if self.network_manager:
+                threading.Thread(target=self._trigger_network_report, args=(current_time, "Level 3"), daemon=True).start()
+                
         elif self.progress_score >= 75 and prev_level != "Level 2":
             threading.Thread(target=self.gpio_controller.trigger_level2_alert, daemon=True).start()
             self.socketio.emit("level_update", {"level": "Level 2", "progress": self.progress_score})
             logging.info("触发二级警报")
+            
+            # 触发网络上报
+            if self.network_manager:
+                threading.Thread(target=self._trigger_network_report, args=(current_time, "Level 2"), daemon=True).start()
+                
         elif self.progress_score >= 50 and prev_level != "Level 1":
             threading.Thread(target=self.gpio_controller.trigger_level1_alert, daemon=True).start()
             self.socketio.emit("level_update", {"level": "Level 1", "progress": self.progress_score})
             logging.info("触发一级警报")
+            
+            # 触发网络上报
+            if self.network_manager:
+                threading.Thread(target=self._trigger_network_report, args=(current_time, "Level 1"), daemon=True).start()
     
     def _check_single_behaviors(self, current_time):
         """检查单一行为"""
@@ -493,3 +520,218 @@ class BehaviorAnalyzer:
     def get_fatigue_classes(self):
         """获取疲劳类别"""
         return FATIGUE_CLASSES
+    
+    def set_test_mode(self, enabled, score=0, behaviors=None):
+        """设置测试模式"""
+        self.is_test_mode = enabled
+        if enabled:
+            self.test_score = score
+            self.test_behaviors = behaviors or []
+            self.progress_score = score
+            self.test_mode_start_time = time.time()
+            self.last_test_behavior_time = time.time()
+            self.test_behavior_duration = 0.0
+            
+            # 根据分数设置等级
+            if score >= 95:
+                self.current_level = "Level 3"
+            elif score >= 75:
+                self.current_level = "Level 2"
+            elif score >= 50:
+                self.current_level = "Level 1"
+            else:
+                self.current_level = "Normal"
+            logging.info(f"测试模式已启用: 分数={score}, 行为={behaviors}")
+        else:
+            self.test_score = 0.0
+            self.test_behaviors = []
+            self.test_mode_start_time = 0.0
+            self.last_test_behavior_time = 0.0
+            self.test_behavior_duration = 0.0
+            logging.info("测试模式已禁用")
+    
+    def reset_test_mode(self):
+        """重置测试模式"""
+        self.is_test_mode = False
+        self.test_score = 0.0
+        self.test_behaviors = []
+        self.progress_score = 0.0
+        self.current_level = "Normal"
+        self.clear_events()
+        logging.info("测试模式已重置")
+    
+    
+    def _handle_test_mode_logic(self, current_time):
+        """处理测试模式逻辑，保持正常的分数回退和事件触发机制"""
+        try:
+            is_fatigue = False
+            is_distracted = False
+            new_events = []
+            
+            # 更新测试行为持续时间
+            if self.test_behaviors and self.last_test_behavior_time > 0:
+                self.test_behavior_duration = current_time - self.last_test_behavior_time
+            
+            # 检查是否有活跃的测试行为
+            has_active_test_behavior = self._check_active_test_behavior(current_time)
+            
+            if has_active_test_behavior:
+                # 有活跃测试行为时，保持或增加分数
+                self._update_test_progress(current_time)
+            else:
+                # 没有活跃测试行为时，应用正常的分数回退逻辑
+                self._apply_test_score_decay(current_time)
+            
+            # 确定当前等级
+            prev_level = self.current_level
+            if self.progress_score >= 95:
+                self.current_level = "Level 3"
+            elif self.progress_score >= 75:
+                self.current_level = "Level 2"
+            elif self.progress_score >= 50:
+                self.current_level = "Level 1"
+            else:
+                self.current_level = "Normal"
+            
+            # 触发警报（与正常模式相同的逻辑）
+            self._trigger_alerts(prev_level, current_time)
+            
+            # 检查是否应该创建事件
+            if has_active_test_behavior:
+                new_events = self._create_test_behavior_events(current_time)
+            
+            # 确定疲劳和分心状态
+            is_fatigue = self.progress_score >= 75
+            is_distracted = self.progress_score >= 50 and self.progress_score < 75
+            
+            logging.debug(f"[测试模式] 分数={self.progress_score:.1f}, 等级={self.current_level}, 疲劳={is_fatigue}, 分心={is_distracted}")
+            
+            return is_fatigue, is_distracted, new_events, self.distracted_count, self.progress_score, self.current_level
+            
+        except Exception as e:
+            logging.error(f"[测试模式] 处理逻辑错误: {e}")
+            return False, False, [], self.distracted_count, self.progress_score, self.current_level
+    
+    def _check_active_test_behavior(self, current_time):
+        """检查是否有活跃的测试行为"""
+        if not self.test_behaviors:
+            return False
+        
+        # 如果测试行为持续时间超过阈值，认为行为已结束
+        if self.test_behavior_duration > CONFIG["duration_threshold"]:
+            return False
+        
+        # 如果距离上次测试行为时间太久，认为行为已结束
+        if current_time - self.last_test_behavior_time > CONFIG["window_size"]:
+            return False
+        
+        return True
+    
+    def _update_test_progress(self, current_time):
+        """更新测试进度分数"""
+        if not self.test_behaviors:
+            return
+        
+        # 根据测试行为权重增加分数
+        for behavior in self.test_behaviors:
+            if behavior in BEHAVIOR_WEIGHTS:
+                weight = BEHAVIOR_WEIGHTS[behavior]
+                # 根据持续时间调整增量
+                duration_factor = min(1.5, 1 + self.test_behavior_duration / 20.0)
+                progress_increment = CONFIG["progress_increment"] * weight * duration_factor
+                self.progress_score = min(100.0, self.progress_score + progress_increment)
+    
+    def _apply_test_score_decay(self, current_time):
+        """应用测试分数衰减"""
+        # 应用正常的分数衰减逻辑
+        if self.progress_score > 0:
+            # 检查是否长时间没有分心行为
+            if current_time - self.last_test_behavior_time > CONFIG["safe_driving_confirm_time"]:
+                # 长时间安全驾驶，快速衰减
+                self.progress_score = max(0.0, self.progress_score - CONFIG["progress_decrement_focused"])
+            else:
+                # 正常衰减
+                self.progress_score = max(0.0, self.progress_score - CONFIG["progress_decrement_normal"])
+    
+    def _create_test_behavior_events(self, current_time):
+        """创建测试行为事件"""
+        new_events = []
+        
+        if not self.test_behaviors:
+            return new_events
+        
+        # 为每个测试行为创建事件
+        for behavior in self.test_behaviors:
+            if behavior in BEHAVIOR_WEIGHTS:
+                event_type = "Fatigue" if behavior in FATIGUE_CLASSES else "Distracted"
+                
+                event = {
+                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "start_time": current_time,
+                    "behavior": behavior,
+                    "duration": round(self.test_behavior_duration, 2),
+                    "count": 1,
+                    "confidence": 0.85,  # 测试模式使用固定置信度
+                    "event_type": event_type,
+                    "level": self.current_level
+                }
+                
+                new_events.append(event)
+                self.distracted_count += 1
+                self.distracted_timestamps.append(current_time)
+                
+                # 保存到CSV
+                self._save_event_to_csv(event)
+        
+        return new_events
+    
+    def update_test_behavior(self, behaviors, current_time=None):
+        """更新测试行为（用于模拟疲劳事件）"""
+        if not self.is_test_mode:
+            return
+        
+        if current_time is None:
+            current_time = time.time()
+        
+        self.test_behaviors = behaviors
+        self.last_test_behavior_time = current_time
+        self.test_behavior_duration = 0.0
+        
+        logging.info(f"[测试模式] 更新测试行为: {behaviors}")
+    
+    def _trigger_network_report(self, current_time, level):
+        """触发网络上报"""
+        try:
+            if not self.network_manager:
+                return
+            
+            # 准备行为数据
+            behavior_data = {
+                "behavior": "fatigue_detection",
+                "confidence": self.progress_score / 100.0,
+                "progress_score": self.progress_score,
+                "current_level": level,
+                "distracted_count": self.distracted_count,
+                "timestamp": current_time
+            }
+            
+            # 准备疲劳数据
+            fatigue_data = {
+                "fatigue_score": self.progress_score / 100.0,
+                "eye_blink_rate": 0.45,  # 可以从实际检测中获取
+                "head_movement_score": 0.32,
+                "yawn_count": 2,
+                "attention_score": 0.78,
+                "timestamp": current_time
+            }
+            
+            # 触发事件上报
+            self.network_manager.trigger_event_report(behavior_data)
+            
+            # 触发数据上报
+            self.network_manager.trigger_data_report(fatigue_data)
+            
+            logging.info(f"网络上报已触发: 等级={level}, 分数={self.progress_score}")
+            
+        except Exception as e:
+            logging.error(f"网络上报触发失败: {e}")

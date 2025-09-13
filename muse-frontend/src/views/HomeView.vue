@@ -10,6 +10,7 @@ import EventList from '@/components/EventList.vue'
 import ConfigPanel from '@/components/ConfigPanel.vue'
 import WeightPanel from '@/components/WeightPanel.vue'
 import GPIOControl from '@/components/GPIOControl.vue'
+import FatigueTestPanel from '@/components/FatigueTestPanel.vue'
 import socketService from '@/services/socket'
 import audioService from '@/services/audio'
 
@@ -19,6 +20,7 @@ const detectionStore = useDetectionStore()
 const configPanelRef = ref(null)
 const weightPanelRef = ref(null)
 const gpioControlRef = ref(null)
+const fatigueTestPanelRef = ref(null)
 
 // 计算属性
 const progressBarClass = computed(() => {
@@ -32,7 +34,8 @@ const progressBarClass = computed(() => {
 const allCollapsed = computed(() => {
   return configPanelRef.value?.isCollapsed && 
          weightPanelRef.value?.isCollapsed && 
-         gpioControlRef.value?.isCollapsed
+         gpioControlRef.value?.isCollapsed &&
+         fatigueTestPanelRef.value?.isCollapsed
 })
 
 // 进度变化监听 - 自动播放提示音
@@ -88,12 +91,14 @@ const toggleAllPanels = () => {
   configPanelRef.value?.toggleCollapse()
   weightPanelRef.value?.toggleCollapse()
   gpioControlRef.value?.toggleCollapse()
+  fatigueTestPanelRef.value?.toggleCollapse()
   
   // 如果当前是展开状态，则折叠所有面板
   if (!shouldCollapse) {
     configPanelRef.value.isCollapsed = true
     weightPanelRef.value.isCollapsed = true
     gpioControlRef.value.isCollapsed = true
+    fatigueTestPanelRef.value.isCollapsed = true
   }
 }
 </script>
@@ -171,6 +176,9 @@ const toggleAllPanels = () => {
         
         <!-- GPIO控制 -->
         <GPIOControl ref="gpioControlRef" />
+        
+        <!-- 疲劳状态测试 -->
+        <FatigueTestPanel ref="fatigueTestPanelRef" />
       </div>
     </div>
   </div>

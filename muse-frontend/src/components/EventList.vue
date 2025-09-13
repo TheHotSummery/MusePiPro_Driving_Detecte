@@ -22,7 +22,7 @@
         <el-table 
           :data="events" 
           style="width: 100%"
-          height="300"
+          height="600"
           :row-class-name="getRowClassName"
           empty-text="暂无事件记录"
         >

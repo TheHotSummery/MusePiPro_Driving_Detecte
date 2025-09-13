@@ -111,6 +111,39 @@ export const apiService = {
       console.error('触发GPIO失败:', error)
       throw error
     }
+  },
+
+  // 设置测试疲劳状态
+  async setTestFatigueState(testData) {
+    try {
+      const response = await api.post('/test/fatigue_state', testData)
+      return response.data
+    } catch (error) {
+      console.error('设置测试疲劳状态失败:', error)
+      throw error
+    }
+  },
+
+  // 重置测试疲劳状态
+  async resetTestFatigueState() {
+    try {
+      const response = await api.post('/test/reset_fatigue_state')
+      return response.data
+    } catch (error) {
+      console.error('重置测试疲劳状态失败:', error)
+      throw error
+    }
+  },
+
+  // 模拟疲劳事件
+  async simulateFatigueEvent(eventData) {
+    try {
+      const response = await api.post('/test/simulate_fatigue_event', eventData)
+      return response.data
+    } catch (error) {
+      console.error('模拟疲劳事件失败:', error)
+      throw error
+    }
   }
 }
 
