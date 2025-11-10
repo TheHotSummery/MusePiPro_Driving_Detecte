@@ -1,0 +1,148 @@
+{
+    "timers": [
+      { "name": "T0", "preset": 0.5, "alias": "Q0_Blink" },
+      { "name": "T1", "preset": 0.7, "alias": "Q1_Blink" },
+      { "name": "T2", "preset": 1.0, "alias": "Q2_Blink" },
+      { "name": "T3", "preset": 0.5, "alias": "Q3_Vibrator_Blink" },
+      { "name": "T4", "preset": 0.3, "alias": "Q4_LED_Blink" },
+      { "name": "T5", "preset": 2.0, "alias": "M0_Hold" }
+    ],
+    "counters": [],
+    "rungs": [
+      {
+        "id": "timer_T0_enable",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M0", "normally_open": false },
+          { "type": "timer", "timer": "T0", "normally_open": false }
+        ],
+        "action": { "type": "timer", "timer": "T0" }
+      },
+      {
+        "id": "timer_T1_enable",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M0", "normally_open": false },
+          { "type": "timer", "timer": "T1", "normally_open": false }
+        ],
+        "action": { "type": "timer", "timer": "T1" }
+      },
+      {
+        "id": "timer_T2_enable",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M0", "normally_open": false },
+          { "type": "timer", "timer": "T2", "normally_open": false }
+        ],
+        "action": { "type": "timer", "timer": "T2" }
+      },
+      {
+        "id": "timer_T3_enable",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M0", "normally_open": false },
+          { "type": "timer", "timer": "T3", "normally_open": false }
+        ],
+        "action": { "type": "timer", "timer": "T3" }
+      },
+      {
+        "id": "timer_T4_enable",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M0", "normally_open": false },
+          { "type": "timer", "timer": "T4", "normally_open": false }
+        ],
+        "action": { "type": "timer", "timer": "T4" }
+      },
+      {
+        "id": "timer_T5_enable",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M0", "normally_open": false },
+          { "type": "timer", "timer": "T5", "normally_open": false }
+        ],
+        "action": { "type": "timer", "timer": "T5" }
+      },
+      {
+        "id": "output_Q0_from_T0",
+        "enabled": true,
+        "conditions": [
+          { "type": "timer", "timer": "T0", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q0" }
+      },
+      {
+        "id": "output_Q1_from_T1",
+        "enabled": true,
+        "conditions": [
+          { "type": "timer", "timer": "T1", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q1" }
+      },
+      {
+        "id": "output_Q2_from_T2",
+        "enabled": true,
+        "conditions": [
+          { "type": "timer", "timer": "T2", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q2" }
+      },
+      {
+        "id": "output_Q3_from_T3",
+        "enabled": true,
+        "conditions": [
+          { "type": "timer", "timer": "T3", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q3" }
+      },
+      {
+        "id": "output_Q4_from_T4",
+        "enabled": true,
+        "conditions": [
+          { "type": "timer", "timer": "T4", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q4" }
+      },
+      {
+        "id": "output_Q5_from_M1",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M1", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q5" }
+      },
+      {
+        "id": "YOLO_Level1_Q3_output",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M40", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q3" }
+      },
+      {
+        "id": "YOLO_Level2_T4_enable",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M41", "normally_open": true },
+          { "type": "timer", "timer": "T4", "normally_open": false }
+        ],
+        "action": { "type": "timer", "timer": "T4" }
+      },
+      {
+        "id": "YOLO_Level2_Q4_output",
+        "enabled": true,
+        "conditions": [
+          { "type": "timer", "timer": "T4", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q4" }
+      },
+      {
+        "id": "YOLO_Level3_Q5_output",
+        "enabled": true,
+        "conditions": [
+          { "type": "memory", "memory": "M42", "normally_open": true }
+        ],
+        "action": { "type": "output", "output": "Q5" }
+      }
+    ]
+  }

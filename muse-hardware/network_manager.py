@@ -31,9 +31,13 @@ class NetworkManager:
         self.is_initialized = False
         self.is_network_test_running = False  # 防重复点击标志
         self.offline_mode = False  # 离线模式标志
+        self.request_in_progress = False  # 请求进行中标志
         
         # 状态管理
         self.last_gps_location = None
+        self.last_real_gps_location = None  # 存储最后一次成功获取的真实坐标
+        self.gps_failure_count = 0  # GPS获取失败计数
+        self.max_gps_failures = 3  # 最大连续失败次数，超过后返回空坐标
         self.last_heartbeat_time = 0
         self.last_event_time = 0
         self.last_data_report_time = 0
@@ -91,8 +95,8 @@ class NetworkManager:
             },
             "timing": {
                 "heartbeat_interval": 240,  # 4分钟
-                "gps_interval": 120,        # 2分钟
-                "event_cooldown": 10,       # 事件间隔10秒
+                "gps_interval": 20,         # 20秒
+                "event_cooldown": 5,        # 事件间隔5秒
                 "retry_interval": 30        # 重试间隔30秒
             },
             "default_data": {
@@ -271,21 +275,72 @@ class NetworkManager:
         try:
             location = self.module.get_gnss_location(retries=1)
             self.last_gps_location = location
+            self.last_real_gps_location = location  # 更新最后真实坐标
+            self.gps_failure_count = 0  # 重置失败计数
             lat = location['wgs84']['latitude']
             lng = location['wgs84']['longitude']
             logging.info(f"获取GPS坐标成功: {lat:.6f}, {lng:.6f}")
             return True, f"GPS坐标: {lat:.6f}, {lng:.6f}", location
         except GNSSFixError as e:
-            logging.warning(f"获取GPS坐标失败: {e}")
-            # 使用上次的坐标或默认坐标
-            if self.last_gps_location:
-                lat = self.last_gps_location['wgs84']['latitude']
-                lng = self.last_gps_location['wgs84']['longitude']
-                return False, f"使用上次GPS坐标: {lat:.6f}, {lng:.6f}", self.last_gps_location
+            self.gps_failure_count += 1
+            logging.warning(f"获取GPS坐标失败 (第{self.gps_failure_count}次): {e}")
+            
+            # 如果是516错误，输出星历信息
+            error_str = str(e)
+            if "516" in error_str or "CME ERROR: 516" in error_str:
+                logging.info("GPS错误516：卫星数量不足，正在获取星历信息...")
+                try:
+                    satellites_info = self.module.get_current_satellites_info()
+                    if satellites_info:
+                        logging.info(f"当前卫星信息: 总数={satellites_info.get('total', 0)}")
+                        for system, count in satellites_info.get('systems', {}).items():
+                            logging.info(f"  {system}: {count}颗卫星")
+                    else:
+                        logging.info("无法获取卫星信息")
+                except Exception as sat_e:
+                    logging.warning(f"获取卫星信息失败: {sat_e}")
             else:
-                lat = self.config["default_data"]["latitude"]
-                lng = self.config["default_data"]["longitude"]
-                return False, f"使用默认GPS坐标: {lat:.6f}, {lng:.6f}", None
+                logging.info(f"GPS错误详情: {error_str}")
+            
+            # 智能回退逻辑
+            return self._handle_gps_fallback()
+    
+    def _handle_gps_fallback(self):
+        """处理GPS获取失败的回退逻辑"""
+        # 1. 优先使用最后一次成功获取的真实坐标
+        if self.last_real_gps_location:
+            lat = self.last_real_gps_location['wgs84']['latitude']
+            lng = self.last_real_gps_location['wgs84']['longitude']
+            
+            # 标记为非实时坐标
+            fallback_location = self.last_real_gps_location.copy()
+            fallback_location['is_realtime'] = False
+            fallback_location['fallback_reason'] = f"GPS获取失败，使用历史坐标 (失败次数: {self.gps_failure_count})"
+            
+            logging.info(f"使用历史真实GPS坐标: {lat:.6f}, {lng:.6f} (非实时)")
+            return False, f"使用历史真实GPS坐标: {lat:.6f}, {lng:.6f} (非实时)", fallback_location
+        
+        # 2. 如果连续失败次数超过阈值，返回空坐标
+        if self.gps_failure_count >= self.max_gps_failures:
+            logging.warning(f"GPS连续失败{self.gps_failure_count}次，返回空坐标")
+            return False, f"GPS连续失败{self.gps_failure_count}次，返回空坐标", None
+        
+        # 3. 使用默认坐标（仅在启动初期且没有历史坐标时）
+        lat = self.config["default_data"]["latitude"]
+        lng = self.config["default_data"]["longitude"]
+        
+        # 创建默认坐标对象
+        default_location = {
+            'wgs84': {
+                'latitude': lat,
+                'longitude': lng
+            },
+            'is_realtime': False,
+            'fallback_reason': f"使用默认坐标 (失败次数: {self.gps_failure_count})"
+        }
+        
+        logging.info(f"使用默认GPS坐标: {lat:.6f}, {lng:.6f} (失败次数: {self.gps_failure_count})")
+        return False, f"使用默认GPS坐标: {lat:.6f}, {lng:.6f} (失败次数: {self.gps_failure_count})", default_location
     
     def get_satellite_info(self):
         """获取卫星信息"""
@@ -306,43 +361,81 @@ class NetworkManager:
             return False, f"获取卫星信息失败: {e}", None
     
     def device_login(self):
-        """设备登录"""
+        """设备登录（带超时保护，最多等待30秒）"""
         if not self.is_initialized or not self.module:
             return False, "模块未初始化"
         
-        try:
-            url = f"{self.config['server']['base_url']}/api/v1/auth/login"
-            payload = {
-                "deviceId": self.config["device"]["device_id"],
-                "deviceType": self.config["device"]["device_type"],
-                "version": self.config["device"]["version"],
-                "username": self.config["device"]["username"],
-                "password": self.config["device"]["password"]
-            }
-            
-            response = self.module.http_request('POST', url, data=json.dumps(payload))
-            body = response['body']
-            
-            # 解析响应
-            start_idx = body.find('{')
-            end_idx = body.rfind('}')
-            if start_idx != -1 and end_idx != -1:
-                json_str = body[start_idx:end_idx+1]
-                data = json.loads(json_str)
+        # 检查是否有请求正在进行中
+        if self.request_in_progress:
+            logging.info("网络请求进行中，跳过登录")
+            return False, "网络请求进行中，跳过登录"
+        
+        # 使用线程超时保护，避免长时间阻塞
+        import threading
+        result_container = [None]
+        exception_container = [None]
+        
+        def login_operation():
+            try:
+                # 设置请求进行中标志
+                self.request_in_progress = True
                 
-                if data.get("code") == 200:
-                    self.token = data["data"]["token"]
-                    self.token_expire_time = time.time() + 24 * 3600  # 24小时
-                    logging.info("设备登录成功")
-                    return True, "设备登录成功"
+                url = f"{self.config['server']['base_url']}/api/v1/auth/login"
+                payload = {
+                    "deviceId": self.config["device"]["device_id"],
+                    "deviceType": self.config["device"]["device_type"],
+                    "version": self.config["device"]["version"],
+                    "username": self.config["device"]["username"],
+                    "password": self.config["device"]["password"]
+                }
+                
+                logging.info(f"开始设备登录: {self.config['device']['device_id']}")
+                response = self.module.http_request('POST', url, data=json.dumps(payload))
+                body = response['body']
+                
+                logging.info(f"登录响应: {body}")
+                
+                # 解析响应
+                start_idx = body.find('{')
+                end_idx = body.rfind('}')
+                if start_idx != -1 and end_idx != -1:
+                    json_str = body[start_idx:end_idx+1]
+                    data = json.loads(json_str)
+                    
+                    if data.get("code") == 200:
+                        self.token = data["data"]["token"]
+                        self.token_expire_time = time.time() + 24 * 3600  # 24小时
+                        logging.info("✅ 设备登录成功")
+                        result_container[0] = (True, "设备登录成功")
+                    else:
+                        logging.warning(f"❌ 登录失败: {data.get('message', '未知错误')}")
+                        result_container[0] = (False, f"登录失败: {data.get('message', '未知错误')}")
                 else:
-                    return False, f"登录失败: {data.get('message', '未知错误')}"
-            else:
-                return False, "响应格式错误"
-                
-        except Exception as e:
-            logging.error(f"设备登录失败: {e}")
-            return False, f"设备登录失败: {e}"
+                    logging.warning("❌ 登录响应格式错误")
+                    result_container[0] = (False, "响应格式错误")
+            except Exception as e:
+                logging.error(f"设备登录失败: {e}")
+                exception_container[0] = e
+                result_container[0] = (False, f"设备登录失败: {e}")
+            finally:
+                # 确保请求状态标志被重置
+                self.request_in_progress = False
+        
+        # 在单独线程中执行，带超时
+        login_thread = threading.Thread(target=login_operation, daemon=True)
+        login_thread.start()
+        login_thread.join(timeout=30.0)  # 最多等待30秒
+        
+        if login_thread.is_alive():
+            logging.warning("设备登录操作超时（已等待30秒），可能网络或串口卡死")
+            self.request_in_progress = False  # 重置标志
+            return False, "登录操作超时"
+        
+        if exception_container[0]:
+            logging.error(f"设备登录异常: {exception_container[0]}")
+            return False, str(exception_container[0])
+        
+        return result_container[0] if result_container[0] else (False, "登录失败")
     
     def _check_token_validity(self):
         """检查Token有效性"""
@@ -353,6 +446,13 @@ class NetworkManager:
     
     def _api_call(self, method, endpoint, data=None, friendly_name="API调用"):
         """通用API调用方法"""
+        # 检查是否有请求正在进行中
+        if self.request_in_progress:
+            if data:
+                self._add_to_offline_queue(friendly_name, data)
+                logging.info(f"网络请求进行中：{friendly_name}数据已缓存")
+            return False, f"{friendly_name}失败: 网络请求进行中，数据已缓存"
+        
         # 如果处于离线模式，直接缓存数据
         if self.offline_mode:
             if data:
@@ -377,11 +477,19 @@ class NetworkManager:
                 return False, f"{friendly_name}失败: {message}，数据已缓存"
         
         try:
+            # 设置请求进行中标志
+            self.request_in_progress = True
+            
             url = f"{self.config['server']['base_url']}{endpoint}?token={self.token}"
             request_data = json.dumps(data) if data is not None else None
             
+            logging.info(f"发送HTTP请求: {method} {url}")
+            logging.info(f"请求数据: {request_data}")
+            
             response = self.module.http_request(method, url, data=request_data)
             body = response['body']
+            
+            logging.info(f"HTTP响应: {body}")
             
             # 解析响应
             start_idx = body.find('{')
@@ -411,6 +519,9 @@ class NetworkManager:
             if data:
                 self._add_to_offline_queue(friendly_name, data)
             return False, f"{friendly_name}失败: {e}"
+        finally:
+            # 确保请求状态标志被重置
+            self.request_in_progress = False
     
     def device_online(self):
         """设备上线"""
@@ -421,11 +532,36 @@ class NetworkManager:
         return self._api_call('GET', '/api/v1/device/offline', None, "设备离线")
     
     def send_heartbeat(self):
-        """发送心跳"""
+        """发送心跳（带超时保护，最多等待20秒）"""
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec='seconds') + 'Z'
         }
-        return self._api_call('POST', '/api/v1/device/heartbeat', payload, "发送心跳")
+        # 使用线程超时保护，避免长时间阻塞
+        import threading
+        result_container = [None]
+        exception_container = [None]
+        
+        def heartbeat_operation():
+            try:
+                result_container[0] = self._api_call('POST', '/api/v1/device/heartbeat', payload, "发送心跳")
+            except Exception as e:
+                exception_container[0] = e
+                result_container[0] = (False, f"发送心跳失败: {e}")
+        
+        # 在单独线程中执行，带超时
+        heartbeat_thread = threading.Thread(target=heartbeat_operation, daemon=True)
+        heartbeat_thread.start()
+        heartbeat_thread.join(timeout=20.0)  # 最多等待20秒
+        
+        if heartbeat_thread.is_alive():
+            logging.warning("发送心跳操作超时（已等待20秒），可能网络或串口卡死")
+            return False, "心跳发送超时"
+        
+        if exception_container[0]:
+            logging.error(f"发送心跳异常: {exception_container[0]}")
+            return False, str(exception_container[0])
+        
+        return result_container[0] if result_container[0] else (False, "心跳发送失败")
     
     def report_event_data(self, behavior_data=None):
         """上报事件数据"""
@@ -441,9 +577,15 @@ class NetworkManager:
         if location:
             lat = location['wgs84']['latitude']
             lng = location['wgs84']['longitude']
+            # 检查是否为实时坐标
+            is_realtime = location.get('is_realtime', True)
+            fallback_reason = location.get('fallback_reason', '')
         else:
-            lat = self.config["default_data"]["latitude"]
-            lng = self.config["default_data"]["longitude"]
+            # 返回空坐标，让后端进行判断
+            lat = None
+            lng = None
+            is_realtime = False
+            fallback_reason = "GPS获取失败，返回空坐标"
         
         # 确定严重程度（测试阶段：低于40也当作LOW）
         progress_score = behavior_data.get("progress_score", 0)
@@ -469,6 +611,10 @@ class NetworkManager:
         else:
             event_type = "EMERGENCY"
         
+        # 确定告警级别
+        current_level = behavior_data.get("current_level", "Normal")
+        alert_level = current_level
+        
         # 生成事件ID
         current_time = datetime.now()
         if self.module and hasattr(self.module, 'get_accurate_timestamp'):
@@ -478,6 +624,46 @@ class NetworkManager:
         
         event_id = f"{self.config['device']['device_id']}_{timestamp}_{behavior}"
         
+        # 构建GPIO触发信息
+        gpio_triggered = {
+            "level": current_level,
+            "gpio_pins": [],
+            "trigger_time": current_time.isoformat()
+        }
+        
+        # 根据等级添加GPIO信息
+        if current_level == "Level 1":
+            gpio_triggered["gpio_pins"] = ["GPIO71"]
+            gpio_triggered["action"] = "振动马达间歇性震动"
+        elif current_level == "Level 2":
+            gpio_triggered["gpio_pins"] = ["GPIO71", "GPIO70"]
+            gpio_triggered["action"] = "振动马达间歇性震动+LED闪烁"
+        elif current_level == "Level 3":
+            gpio_triggered["gpio_pins"] = ["GPIO71", "GPIO70", "GPIO72"]
+            gpio_triggered["action"] = "振动马达间歇性震动+LED闪烁+蜂鸣器持续响"
+        
+        # 构建上下文信息
+        context = {
+            "device_info": {
+                "device_id": self.config["device"]["device_id"],
+                "device_type": self.config["device"]["device_type"],
+                "version": self.config["device"]["version"]
+            },
+            "detection_info": {
+                "distracted_count": behavior_data.get("distracted_count", 0),
+                "progress_score": progress_score,
+                "confidence": behavior_data.get("confidence", 0.85)
+            },
+            "system_info": {
+                "timestamp": behavior_data.get("timestamp", time.time()),
+                "gps_available": gps_success,
+                "gps_realtime": is_realtime,
+                "gps_fallback_reason": fallback_reason,
+                "gps_failure_count": self.gps_failure_count,
+                "offline_mode": self.offline_mode
+            }
+        }
+        
         payload = {
             "eventId": event_id,
             "timestamp": current_time.isoformat(),
@@ -486,7 +672,11 @@ class NetworkManager:
             "locationLat": lat,
             "locationLng": lng,
             "behavior": behavior,
-            "confidence": behavior_data.get("confidence", 0.85)
+            "confidence": behavior_data.get("confidence", 0.85),
+            "duration": behavior_data.get("duration", 0.0),  # 持续时间
+            "alertLevel": alert_level,  # 告警级别
+            "gpioTriggered": json.dumps(gpio_triggered),  # GPIO触发信息(JSON字符串)
+            "context": json.dumps(context)  # 上下文信息(JSON字符串)
         }
         
         return self._api_call('POST', '/api/v1/data/event', payload, "上报事件数据")
@@ -502,8 +692,8 @@ class NetworkManager:
             # 构建原始GPS数据字符串
             raw_gps_data = self._construct_raw_gps_string(location)
         else:
-            # 使用默认值构建
-            raw_gps_data = self._construct_default_gps_string()
+            # GPS获取失败，返回空字符串，让后端判断
+            raw_gps_data = ""
         
         payload = {
             "raw_gps_data": raw_gps_data,
@@ -649,11 +839,12 @@ class NetworkManager:
                 return
             
             if self.is_initialized and self._check_token_validity():
+                logging.info("开始定时心跳发送...")
                 success, message = self.send_heartbeat()
                 if success:
-                    logging.info("定时心跳发送成功")
+                    logging.info(f"✅ 定时心跳发送成功: {message}")
                 else:
-                    logging.warning(f"定时心跳发送失败: {message}")
+                    logging.warning(f"❌ 定时心跳发送失败: {message}")
             else:
                 logging.debug("跳过定时心跳：模块未初始化或Token无效")
         except Exception as e:
@@ -670,6 +861,24 @@ class NetworkManager:
                 success, message, location = self.get_gps_location()
                 if success:
                     logging.info("定时GPS更新成功")
+                    
+                    # 获取GPS坐标成功后，上报GPS数据
+                    if self._check_token_validity():
+                        logging.info("开始定时GPS数据上报...")
+                        fatigue_data = {
+                            "fatigue_score": 0.85,  # 默认值
+                            "eye_blink_rate": 0.45,
+                            "head_movement_score": 0.32,
+                            "yawn_count": 2,
+                            "attention_score": 0.78
+                        }
+                        report_success, report_message = self.report_gps_data(fatigue_data)
+                        if report_success:
+                            logging.info(f"✅ 定时GPS数据上报成功: {report_message}")
+                        else:
+                            logging.warning(f"❌ 定时GPS数据上报失败: {report_message}")
+                    else:
+                        logging.debug("跳过GPS数据上报：Token无效")
                 else:
                     logging.debug(f"定时GPS更新失败: {message}")
             else:
@@ -741,52 +950,70 @@ class NetworkManager:
         """触发事件上报（由行为检测调用）"""
         try:
             current_time = time.time()
+            logging.info(f"触发事件上报: 数据={behavior_data}")
+            
+            # 检查是否有请求正在进行中
+            if self.request_in_progress:
+                logging.info("网络请求进行中，跳过事件上报")
+                return False
             
             # 检查事件间隔
             if current_time - self.last_event_time < self.config["timing"]["event_cooldown"]:
-                logging.debug("事件上报间隔太短，跳过")
+                logging.info(f"事件上报间隔太短，跳过 (间隔: {current_time - self.last_event_time:.1f}s, 要求: {self.config['timing']['event_cooldown']}s)")
                 return False
             
             # 检查进度分数（测试阶段：低于40也当作LOW上传）
             progress_score = behavior_data.get("progress_score", 0)
             if progress_score < 10:  # 降低阈值，测试阶段更宽松
-                logging.debug("进度分数过低，不触发事件上报")
+                logging.info(f"进度分数过低，不触发事件上报 (分数: {progress_score})")
                 return False
             
+            logging.info(f"开始上报事件数据: {behavior_data}")
             success, message = self.report_event_data(behavior_data)
             if success:
                 self.last_event_time = current_time
-                logging.info(" 事件上报成功")
+                logging.info(f"✅ 事件上报成功: {message}")
                 return True
             else:
-                logging.warning(f" 事件上报失败: {message}")
+                logging.warning(f"❌ 事件上报失败: {message}")
                 return False
                 
         except Exception as e:
             logging.error(f"触发事件上报异常: {e}")
+            import traceback
+            logging.error(f"错误堆栈: {traceback.format_exc()}")
             return False
     
     def trigger_data_report(self, fatigue_data):
         """触发数据上报（由行为检测调用）"""
         try:
             current_time = time.time()
+            logging.info(f"触发数据上报: 数据={fatigue_data}")
+            
+            # 检查是否有请求正在进行中
+            if self.request_in_progress:
+                logging.info("网络请求进行中，跳过数据上报")
+                return False
             
             # 检查数据上报间隔（可以比事件上报更频繁）
             if current_time - self.last_data_report_time < 30:  # 30秒间隔
-                logging.debug("数据上报间隔太短，跳过")
+                logging.info(f"数据上报间隔太短，跳过 (间隔: {current_time - self.last_data_report_time:.1f}s, 要求: 30s)")
                 return False
             
+            logging.info(f"开始上报GPS数据: {fatigue_data}")
             success, message = self.report_gps_data(fatigue_data)
             if success:
                 self.last_data_report_time = current_time
-                logging.info(" GPS数据上报成功")
+                logging.info(f"✅ GPS数据上报成功: {message}")
                 return True
             else:
-                logging.warning(f" GPS数据上报失败: {message}")
+                logging.warning(f"❌ GPS数据上报失败: {message}")
                 return False
                 
         except Exception as e:
             logging.error(f"触发数据上报异常: {e}")
+            import traceback
+            logging.error(f"错误堆栈: {traceback.format_exc()}")
             return False
     
     def cleanup(self):

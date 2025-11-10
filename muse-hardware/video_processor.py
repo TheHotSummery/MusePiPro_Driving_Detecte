@@ -10,7 +10,7 @@ import threading
 import logging
 import numpy as np
 import psutil
-from config import CONFIG, MODEL_INPUT_SIZE, NUM_CLASSES
+from config import CONFIG, MODEL_INPUT_SIZE, NUM_CLASSES, CAMERA_CONFIG
 from utils import preprocess_image, draw_boxes, log_system_metrics
 from model_manager import ModelManager
 from behavior_analyzer import BehaviorAnalyzer
@@ -29,7 +29,7 @@ class VideoProcessor:
         self.processing_thread_running = False
         self.processing_thread_stop_event = threading.Event()
         self.frame_processing_lock = threading.Lock()
-        self.latest_annotated_frame = np.zeros((320, 320, 3), dtype=np.uint8)
+        self.latest_annotated_frame = np.zeros((CAMERA_CONFIG["display_height"], CAMERA_CONFIG["display_width"], 3), dtype=np.uint8)
         
         # 性能统计
         self.frame_count = 0
@@ -37,6 +37,17 @@ class VideoProcessor:
         self.fps_counter = 0
         self.fps_start_time = time.time()
         self.current_fps = 0.0
+        
+        # YOLO处理时间统计（线程安全存储，供性能监控模块读取）
+        self._timing_stats_lock = threading.Lock()
+        self._latest_timing_stats = {
+            'preprocess': 0.0,
+            'inference': 0.0,
+            'postprocess': 0.0,
+            'logic': 0.0,
+            'draw': 0.0,
+            'total': 0.0
+        }
     
     def start_processing_thread(self, source="webcam", device_index=20, image_path=None):
         """启动处理线程"""
@@ -87,10 +98,10 @@ class VideoProcessor:
                     self.processing_thread_running = False
                     return
                 
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 320)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_CONFIG["display_width"])
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_CONFIG["display_height"])
                 cap.set(cv2.CAP_PROP_FPS, CONFIG["fps_target"])
-                logging.info(f"摄像头 /dev/video{device_index} 初始化成功，设置分辨率 320x320，FPS {CONFIG['fps_target']}")
+                logging.info(f"摄像头 /dev/video{device_index} 初始化成功，设置分辨率 {CAMERA_CONFIG['display_width']}x{CAMERA_CONFIG['display_height']}，FPS {CONFIG['fps_target']}")
             
             prev_frame_time = time.time()
             last_socketio_emit = 0.0
@@ -110,8 +121,39 @@ class VideoProcessor:
                     if not ret or current_frame is None:
                         logging.error("视频流读取失败")
                         self.socketio.emit("error", {"message": "视频流读取失败"})
+                        
+                        # 连续失败计数，如果失败太多次，尝试重新初始化摄像头
+                        if not hasattr(self, '_read_failure_count'):
+                            self._read_failure_count = 0
+                        self._read_failure_count += 1
+                        
+                        # 如果连续失败超过10次，尝试重新初始化摄像头
+                        if self._read_failure_count >= 10:
+                            logging.warning(f"视频流连续失败 {self._read_failure_count} 次，尝试重新初始化摄像头...")
+                            try:
+                                cap.release()
+                                time.sleep(1.0)  # 等待1秒
+                                cap = cv2.VideoCapture(device_index, cv2.CAP_V4L2)
+                                if cap.isOpened():
+                                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_CONFIG["display_width"])
+                                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_CONFIG["display_height"])
+                                    cap.set(cv2.CAP_PROP_FPS, CONFIG["fps_target"])
+                                    logging.info("摄像头重新初始化成功")
+                                    self._read_failure_count = 0  # 重置计数
+                                else:
+                                    logging.error("摄像头重新初始化失败")
+                            except Exception as e:
+                                logging.error(f"重新初始化摄像头时出错: {e}")
+                        
                         time.sleep(0.1)
                         continue
+                    
+                    # 读取成功，重置失败计数
+                    if hasattr(self, '_read_failure_count'):
+                        if self._read_failure_count > 0:
+                            logging.info(f"视频流恢复成功（之前失败 {self._read_failure_count} 次）")
+                        self._read_failure_count = 0
+                    
                     self.frame_count += 1
                     self.fps_counter += 1
                 
@@ -154,12 +196,28 @@ class VideoProcessor:
                     
                     # 绘制检测框
                     start_draw = time.time()
+                    display_size = (CAMERA_CONFIG["display_height"], CAMERA_CONFIG["display_width"])
                     annotated_frame = draw_boxes(
                         current_frame.copy(), detections, MODEL_INPUT_SIZE, 
                         self.behavior_analyzer.get_label_map(), 
-                        self.behavior_analyzer.get_fatigue_classes()
+                        self.behavior_analyzer.get_fatigue_classes(),
+                        display_size
                     )
                     draw_time = (time.time() - start_draw) * 1000
+                    
+                    # 计算总时间
+                    total_time = preprocess_time + inference_time + postprocess_time + logic_time + draw_time
+                    
+                    # 更新最新的处理时间统计（线程安全）
+                    with self._timing_stats_lock:
+                        self._latest_timing_stats = {
+                            'preprocess': preprocess_time,
+                            'inference': inference_time,
+                            'postprocess': postprocess_time,
+                            'logic': logic_time,
+                            'draw': draw_time,
+                            'total': total_time
+                        }
                     
                     # 记录系统指标
                     log_system_metrics(preprocess_time, inference_time, postprocess_time, logic_time, draw_time)
@@ -168,15 +226,15 @@ class VideoProcessor:
                     with self.frame_processing_lock:
                         self.latest_annotated_frame = annotated_frame.copy()
                     
-                    # 发送SocketIO更新
-                    if current_time - last_socketio_emit >= 0.25:
+                    # 发送SocketIO更新（降低更新频率，减少延迟）
+                    if current_time - last_socketio_emit >= 0.2:  # 从0.25秒降低到0.2秒，提高响应速度
                         self._emit_detection_update(
                             detections, is_fatigue, is_distracted, distracted_count, 
                             progress_score, level
                         )
                         last_socketio_emit = current_time
                     
-                    # 更新进度和FPS
+                    # 更新进度和FPS（优化延迟：减少不必要的sleep）
                     if current_time - self.last_progress_update >= 1.0:
                         self.last_progress_update = current_time
                         # 计算FPS
@@ -185,11 +243,14 @@ class VideoProcessor:
                             self.fps_counter = 0
                             self.fps_start_time = current_time
                     
-                    # 控制帧率
+                    # 控制帧率（优化延迟：只在需要时才sleep）
                     time_spent = time.time() - loop_start
-                    time_to_sleep = (1.0 / CONFIG["fps_target"]) - time_spent
-                    if time_to_sleep > 0:
-                        time.sleep(time_to_sleep)
+                    target_frame_time = 1.0 / CONFIG["fps_target"]
+                    if time_spent < target_frame_time:
+                        time_to_sleep = target_frame_time - time_spent
+                        if time_to_sleep > 0.01:  # 只sleep超过10ms的情况，减少微小延迟
+                            time.sleep(time_to_sleep)
+                    # 如果处理时间超过目标时间，不sleep，直接处理下一帧（避免累积延迟）
                     
                     prev_frame_time = loop_start + (1.0 / CONFIG["fps_target"])
                     
@@ -237,6 +298,11 @@ class VideoProcessor:
             logging.debug(f"SocketIO 传输时间: {emit_time:.2f} ms")
         except Exception as e:
             logging.error(f"发送检测更新失败: {e}")
+    
+    def get_latest_timing_stats(self):
+        """获取最新的处理时间统计（线程安全）"""
+        with self._timing_stats_lock:
+            return self._latest_timing_stats.copy()
     
     def get_latest_frame(self):
         """获取最新处理后的帧"""

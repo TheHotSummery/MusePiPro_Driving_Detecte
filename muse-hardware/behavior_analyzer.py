@@ -62,13 +62,13 @@ class BehaviorAnalyzer:
             # 存储当前检测结果用于清醒驾驶检测
             self._current_detections = detections
             
-            # 确定当前等级
+            # 确定当前等级（提高阈值，减缓等级上升速度）
             prev_level = self.current_level
             if self.progress_score >= 95:
                 self.current_level = "Level 3"
-            elif self.progress_score >= 75:
+            elif self.progress_score >= 80:  # 从75提高到80，减缓等级上升
                 self.current_level = "Level 2"
-            elif self.progress_score >= 50:
+            elif self.progress_score >= 60:  # 从50提高到60，减缓等级上升
                 self.current_level = "Level 1"
             else:
                 self.current_level = "Normal"
@@ -128,11 +128,19 @@ class BehaviorAnalyzer:
     def _handle_safe_driving_reset(self, current_time):
         """处理安全驾驶重置逻辑"""
         # 检查是否所有检测都是专注驾驶或低置信度
-        all_focused = True
+        # 放宽条件：如果有专注驾驶检测，即使有其他低置信度检测也认为是专注驾驶
+        all_focused = False
+        has_focused = False
+        has_high_conf_other = False
+        
         for detection in self._get_current_detections():
-            if detection["label"] != "focused" and detection["confidence"] >= CONFIG["min_confidence"]:
-                all_focused = False
-                break
+            if detection["label"] == "focused" and detection["confidence"] >= CONFIG["focused_min_confidence"]:
+                has_focused = True
+            elif detection["label"] != "focused" and detection["confidence"] >= CONFIG["min_confidence"]:
+                has_high_conf_other = True
+        
+        # 如果有专注驾驶检测，且没有其他高置信度的非专注行为，认为是专注驾驶
+        all_focused = has_focused and not has_high_conf_other
         
         if all_focused:
             if self.last_safe_time is None:
@@ -190,9 +198,10 @@ class BehaviorAnalyzer:
             
             self.behavior_tracker[label]["detections"].append((current_time, conf))
             
-            # 调整累加逻辑：每秒累加约5分（10秒50，15秒75，20秒95）
+            # 调整累加逻辑：降低累加速度，减缓等级上升
             duration = current_time - (self.behavior_tracker[label]["detections"][0][0] if self.behavior_tracker[label]["detections"] else current_time)
-            progress_increment = CONFIG["progress_increment"] * BEHAVIOR_WEIGHTS.get(label, 0) * min(1.5, 1 + duration / 20.0)
+            # 将持续时间因子从20.0秒改为30.0秒，降低累加速度
+            progress_increment = CONFIG["progress_increment"] * BEHAVIOR_WEIGHTS.get(label, 0) * min(1.5, 1 + duration / 30.0)
             self.progress_score = min(100.0, self.progress_score + progress_increment)
             
             logging.debug(f"行为: {label}, 增量: {progress_increment:.2f}, 持续时间: {duration:.2f}s, 当前分数: {self.progress_score:.2f}")
@@ -209,33 +218,32 @@ class BehaviorAnalyzer:
         """触发警报"""
         import threading
         
-        if (self.progress_score >= 95 and prev_level != "Level 3" and 
-            current_time - self.last_level3_time >= CONFIG["level3_cooldown"]):
-            threading.Thread(target=self.gpio_controller.trigger_level3_alert, daemon=True).start()
-            self.socketio.emit("level_update", {"level": "Level 3", "progress": self.progress_score})
-            logging.info("触发三级警报")
+        level_changed = False
+        
+        # 使用新的 PLC 控制方法，实现正确的叠加和下降逻辑
+        if self.current_level != prev_level:
+            self.gpio_controller.update_alert_level(self.current_level)
+            self.socketio.emit("level_update", {"level": self.current_level, "progress": self.progress_score})
+            level_changed = True
             
-            # 触发网络上报
-            if self.network_manager:
-                threading.Thread(target=self._trigger_network_report, args=(current_time, "Level 3"), daemon=True).start()
-                
-        elif self.progress_score >= 75 and prev_level != "Level 2":
-            threading.Thread(target=self.gpio_controller.trigger_level2_alert, daemon=True).start()
-            self.socketio.emit("level_update", {"level": "Level 2", "progress": self.progress_score})
-            logging.info("触发二级警报")
-            
-            # 触发网络上报
-            if self.network_manager:
-                threading.Thread(target=self._trigger_network_report, args=(current_time, "Level 2"), daemon=True).start()
-                
-        elif self.progress_score >= 50 and prev_level != "Level 1":
-            threading.Thread(target=self.gpio_controller.trigger_level1_alert, daemon=True).start()
-            self.socketio.emit("level_update", {"level": "Level 1", "progress": self.progress_score})
-            logging.info("触发一级警报")
-            
-            # 触发网络上报
-            if self.network_manager:
-                threading.Thread(target=self._trigger_network_report, args=(current_time, "Level 1"), daemon=True).start()
+            if self.current_level == "Level 3":
+                logging.info("=============== 疲劳等级变化: 触发三级警报 (分数: {:.1f})".format(self.progress_score))
+                print("=============== 疲劳等级变化: 触发三级警报 (分数: {:.1f})".format(self.progress_score))
+            elif self.current_level == "Level 2":
+                logging.info("=============== 疲劳等级变化: 触发二级警报 (分数: {:.1f})".format(self.progress_score))
+                print("=============== 疲劳等级变化: 触发二级警报 (分数: {:.1f})".format(self.progress_score))
+            elif self.current_level == "Level 1":
+                logging.info("=============== 疲劳等级变化: 触发一级警报 (分数: {:.1f})".format(self.progress_score))
+                print("=============== 疲劳等级变化: 触发一级警报 (分数: {:.1f})".format(self.progress_score))
+            elif self.current_level == "Normal":
+                logging.info("=============== 疲劳等级变化: 恢复正常状态 (分数: {:.1f})".format(self.progress_score))
+                print("=============== 疲劳等级变化: 恢复正常状态 (分数: {:.1f})".format(self.progress_score))
+        
+        # 只在等级真正变化时触发网络上报
+        if level_changed and self.network_manager:
+            logging.info("=============== 网络上报: 疲劳等级变化 {} -> {}, 触发网络上报".format(prev_level, self.current_level))
+            print("=============== 网络上报: 疲劳等级变化 {} -> {}, 触发网络上报".format(prev_level, self.current_level))
+            threading.Thread(target=self._trigger_network_report, args=(current_time, self.current_level), daemon=True).start()
     
     def _check_single_behaviors(self, current_time):
         """检查单一行为"""
@@ -284,7 +292,7 @@ class BehaviorAnalyzer:
     def _create_single_behavior_event(self, label, data, detections, current_time, event_type):
         """创建单一行为事件"""
         avg_conf = sum(c for t, c in data["detections"]) / len(data["detections"])
-        level = "Level 1" if self.progress_score < 75 else "Level 2"
+        level = "Level 1" if self.progress_score < 80 else "Level 2"  # 从75提高到80
         duration = 2.0 if len(detections) >= 2 else CONFIG["duration_threshold"]
         
         # 检查事件合并 - 添加更安全的检查
@@ -326,7 +334,7 @@ class BehaviorAnalyzer:
         
         return (fatigue_detections >= 3 or behavior_switches >= 7) and \
                current_time - self.last_level3_time >= CONFIG["level3_cooldown"] and \
-               self.progress_score >= 95
+               self.progress_score >= 95  # Level 3阈值保持不变
     
     def _calculate_behavior_switches(self, current_time):
         """计算行为切换次数"""
@@ -387,7 +395,7 @@ class BehaviorAnalyzer:
                 weighted_score >= CONFIG["score_threshold"] and
                 current_time - self.last_multi_event_time >= CONFIG["multi_event_cooldown"] and
                 current_time - self.last_level3_time >= CONFIG["level3_cooldown"] and
-                self.progress_score >= 75)
+                self.progress_score >= 80)  # 从75提高到80，减缓等级上升
     
     def _create_multi_behavior_event(self, current_time):
         """创建多行为分心事件"""
@@ -438,7 +446,7 @@ class BehaviorAnalyzer:
         
         return (len(self.distracted_timestamps) >= CONFIG["continuous_distracted_count"] and
                 current_time - self.last_level3_time >= CONFIG["level3_cooldown"] and 
-                self.progress_score >= 95)
+                self.progress_score >= 95)  # Level 3阈值保持不变
     
     def _create_continuous_distraction_event(self, current_time):
         """创建连续分心事件"""
@@ -532,12 +540,12 @@ class BehaviorAnalyzer:
             self.last_test_behavior_time = time.time()
             self.test_behavior_duration = 0.0
             
-            # 根据分数设置等级
+            # 根据分数设置等级（同步更新阈值）
             if score >= 95:
                 self.current_level = "Level 3"
-            elif score >= 75:
+            elif score >= 80:  # 从75提高到80，减缓等级上升
                 self.current_level = "Level 2"
-            elif score >= 50:
+            elif score >= 60:  # 从50提高到60，减缓等级上升
                 self.current_level = "Level 1"
             else:
                 self.current_level = "Normal"
@@ -582,13 +590,13 @@ class BehaviorAnalyzer:
                 # 没有活跃测试行为时，应用正常的分数回退逻辑
                 self._apply_test_score_decay(current_time)
             
-            # 确定当前等级
+            # 确定当前等级（提高阈值，减缓等级上升速度）
             prev_level = self.current_level
             if self.progress_score >= 95:
                 self.current_level = "Level 3"
-            elif self.progress_score >= 75:
+            elif self.progress_score >= 80:  # 从75提高到80，减缓等级上升
                 self.current_level = "Level 2"
-            elif self.progress_score >= 50:
+            elif self.progress_score >= 60:  # 从50提高到60，减缓等级上升
                 self.current_level = "Level 1"
             else:
                 self.current_level = "Normal"
@@ -600,9 +608,9 @@ class BehaviorAnalyzer:
             if has_active_test_behavior:
                 new_events = self._create_test_behavior_events(current_time)
             
-            # 确定疲劳和分心状态
-            is_fatigue = self.progress_score >= 75
-            is_distracted = self.progress_score >= 50 and self.progress_score < 75
+            # 确定疲劳和分心状态（同步更新阈值）
+            is_fatigue = self.progress_score >= 80  # 从75提高到80
+            is_distracted = self.progress_score >= 60 and self.progress_score < 80  # 从50提高到60
             
             logging.debug(f"[测试模式] 分数={self.progress_score:.1f}, 等级={self.current_level}, 疲劳={is_fatigue}, 分心={is_distracted}")
             
@@ -632,26 +640,26 @@ class BehaviorAnalyzer:
         if not self.test_behaviors:
             return
         
-        # 根据测试行为权重增加分数
+        # 根据测试行为权重增加分数，但降低变化频率
         for behavior in self.test_behaviors:
             if behavior in BEHAVIOR_WEIGHTS:
                 weight = BEHAVIOR_WEIGHTS[behavior]
-                # 根据持续时间调整增量
-                duration_factor = min(1.5, 1 + self.test_behavior_duration / 20.0)
-                progress_increment = CONFIG["progress_increment"] * weight * duration_factor
+                # 根据持续时间调整增量，但降低变化速度
+                duration_factor = min(1.2, 1 + self.test_behavior_duration / 30.0)  # 降低变化速度
+                progress_increment = CONFIG["progress_increment"] * weight * duration_factor * 0.3  # 降低增量
                 self.progress_score = min(100.0, self.progress_score + progress_increment)
     
     def _apply_test_score_decay(self, current_time):
         """应用测试分数衰减"""
-        # 应用正常的分数衰减逻辑
+        # 应用正常的分数衰减逻辑，但降低衰减速度
         if self.progress_score > 0:
             # 检查是否长时间没有分心行为
             if current_time - self.last_test_behavior_time > CONFIG["safe_driving_confirm_time"]:
-                # 长时间安全驾驶，快速衰减
-                self.progress_score = max(0.0, self.progress_score - CONFIG["progress_decrement_focused"])
+                # 长时间安全驾驶，快速衰减（但降低速度）
+                self.progress_score = max(0.0, self.progress_score - CONFIG["progress_decrement_focused"] * 0.5)
             else:
-                # 正常衰减
-                self.progress_score = max(0.0, self.progress_score - CONFIG["progress_decrement_normal"])
+                # 正常衰减（但降低速度）
+                self.progress_score = max(0.0, self.progress_score - CONFIG["progress_decrement_normal"] * 0.3)
     
     def _create_test_behavior_events(self, current_time):
         """创建测试行为事件"""
@@ -702,8 +710,20 @@ class BehaviorAnalyzer:
     def _trigger_network_report(self, current_time, level):
         """触发网络上报"""
         try:
+            logging.info(f"开始触发网络上报: 等级={level}, 分数={self.progress_score}")
+            
             if not self.network_manager:
+                logging.warning("网络管理器未初始化，跳过网络上报")
                 return
+            
+            # 获取准确的时间戳（整数）
+            if hasattr(self.network_manager, 'module') and self.network_manager.module:
+                try:
+                    accurate_timestamp = self.network_manager.module.get_accurate_timestamp()
+                except:
+                    accurate_timestamp = int(current_time)
+            else:
+                accurate_timestamp = int(current_time)
             
             # 准备行为数据
             behavior_data = {
@@ -712,7 +732,7 @@ class BehaviorAnalyzer:
                 "progress_score": self.progress_score,
                 "current_level": level,
                 "distracted_count": self.distracted_count,
-                "timestamp": current_time
+                "timestamp": accurate_timestamp
             }
             
             # 准备疲劳数据
@@ -722,16 +742,23 @@ class BehaviorAnalyzer:
                 "head_movement_score": 0.32,
                 "yawn_count": 2,
                 "attention_score": 0.78,
-                "timestamp": current_time
+                "timestamp": accurate_timestamp
             }
             
+            logging.info(f"准备上报数据: 行为数据={behavior_data}, 疲劳数据={fatigue_data}")
+            
             # 触发事件上报
-            self.network_manager.trigger_event_report(behavior_data)
+            event_success = self.network_manager.trigger_event_report(behavior_data)
+            logging.info(f"事件上报结果: {event_success}")
             
             # 触发数据上报
-            self.network_manager.trigger_data_report(fatigue_data)
+            data_success = self.network_manager.trigger_data_report(fatigue_data)
+            logging.info(f"数据上报结果: {data_success}")
             
-            logging.info(f"网络上报已触发: 等级={level}, 分数={self.progress_score}")
+            logging.info("=============== 网络上报完成: 等级={}, 分数={:.1f}, 事件上报={}, 数据上报={}".format(level, self.progress_score, event_success, data_success))
+            print("=============== 网络上报完成: 等级={}, 分数={:.1f}, 事件上报={}, 数据上报={}".format(level, self.progress_score, event_success, data_success))
             
         except Exception as e:
             logging.error(f"网络上报触发失败: {e}")
+            import traceback
+            logging.error(f"错误堆栈: {traceback.format_exc()}")

@@ -12,6 +12,7 @@ from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 from config import WEB_CONFIG, CONFIG, BEHAVIOR_WEIGHTS
 from gpio_controller import GPIOController
+from plc_bridge import PLCBridge
 from video_processor import VideoProcessor
 from network_manager import NetworkManager
 
@@ -46,14 +47,22 @@ class WebServer:
             ping_interval=25
         )
         
-        # 初始化组件
-        self.gpio_controller = GPIOController()
+        # 初始化组件（不自动启动 PLC，由外部程序管理）
+        self.plc_bridge = PLCBridge(auto_start=False)
+        self.gpio_controller = GPIOController(self.plc_bridge)
         self.network_manager = NetworkManager()
         self.video_processor = VideoProcessor(self.gpio_controller, self.socketio, self.network_manager)
+        
+        # YOLO 心跳线程标志
+        self._yolo_heartbeat_running = False
+        self._yolo_heartbeat_thread = None
         
         # 设置路由
         self._setup_routes()
         self._setup_socketio_events()
+        
+        # 启动 YOLO 心跳线程（每10秒发送一次心跳）
+        self._start_yolo_heartbeat()
     
     def _setup_routes(self):
         """设置Flask路由"""
@@ -78,7 +87,7 @@ class WebServer:
                     frame_to_send = self.video_processor.get_latest_frame()
                     if frame_to_send is not None:
                         import cv2
-                        ret, buffer = cv2.imencode(".jpg", frame_to_send, [cv2.IMWRITE_JPEG_QUALITY, 40])
+                        ret, buffer = cv2.imencode(".jpg", frame_to_send, [cv2.IMWRITE_JPEG_QUALITY, WEB_CONFIG["jpeg_quality"]])
                         if not ret:
                             logging.error("MJPEG 帧编码失败")
                             continue
@@ -106,7 +115,7 @@ class WebServer:
                     frame_to_send = self.video_processor.get_latest_frame()
                     if frame_to_send is not None:
                         import cv2
-                        ret, buffer = cv2.imencode(".jpg", frame_to_send, [cv2.IMWRITE_JPEG_QUALITY, 40])
+                        ret, buffer = cv2.imencode(".jpg", frame_to_send, [cv2.IMWRITE_JPEG_QUALITY, WEB_CONFIG["jpeg_quality"]])
                         if not ret:
                             continue
                         frame_bytes = buffer.tobytes()
@@ -488,12 +497,67 @@ class WebServer:
             logging.error(f"Web服务器启动失败: {e}")
             raise
     
+    def _start_yolo_heartbeat(self):
+        """启动 YOLO 心跳线程（每10秒写入 M39=ON）
+        
+        注意：心跳发送有超时保护（2秒），即使Modbus卡死也不会阻塞线程。
+        """
+        self._yolo_heartbeat_running = True
+        
+        def heartbeat_loop():
+            logging.info("YOLO 心跳线程启动（每10秒发送一次心跳）")
+            consecutive_failures = 0
+            max_failures = 5  # 连续失败5次后降低日志级别
+            
+            while self._yolo_heartbeat_running:
+                try:
+                    if self.plc_bridge and self.plc_bridge.is_available():
+                        heartbeat_start = time.time()
+                        success = self.plc_bridge.send_yolo_heartbeat()
+                        heartbeat_time = time.time() - heartbeat_start
+                        
+                        if success:
+                            if consecutive_failures > 0:
+                                logging.info("YOLO 心跳恢复成功（M39=ON）")
+                            else:
+                                logging.debug("YOLO 心跳发送成功（M39=ON），耗时 %.3f 秒", heartbeat_time)
+                            consecutive_failures = 0
+                        else:
+                            consecutive_failures += 1
+                            if consecutive_failures <= max_failures:
+                                logging.warning("YOLO 心跳发送失败（连续失败 %d 次）", consecutive_failures)
+                            # 超过max_failures后不再记录警告，避免日志刷屏
+                    else:
+                        logging.debug("Modbus 未连接，跳过 YOLO 心跳")
+                        consecutive_failures = 0
+                except Exception as e:
+                    consecutive_failures += 1
+                    logging.error(f"YOLO 心跳发送异常（连续失败 {consecutive_failures} 次）: {e}")
+                
+                # 等待10秒（分100次检查，每次0.1秒，以便快速响应停止信号）
+                for _ in range(100):
+                    if not self._yolo_heartbeat_running:
+                        break
+                    time.sleep(0.1)
+            
+            logging.info("YOLO 心跳线程结束")
+        
+        self._yolo_heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+        self._yolo_heartbeat_thread.start()
+    
     def cleanup(self):
         """清理资源"""
         try:
+            # 停止 YOLO 心跳线程
+            self._yolo_heartbeat_running = False
+            if self._yolo_heartbeat_thread and self._yolo_heartbeat_thread.is_alive():
+                self._yolo_heartbeat_thread.join(timeout=1.0)
+            
             self.video_processor.stop_processing()
             self.gpio_controller.cleanup()
             self.network_manager.cleanup()
+            if self.plc_bridge:
+                self.plc_bridge.stop()
             logging.info("Web服务器资源清理完成")
         except Exception as e:
             logging.error(f"Web服务器资源清理失败: {e}")

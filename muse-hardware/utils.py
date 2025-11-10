@@ -46,7 +46,7 @@ def preprocess_image(img_raw, model_input_size):
     logging.debug(f"预处理图像: shape={img_final.shape}, min={np.min(img_final)}, max={np.max(img_final)}")
     return img_final, h_orig, w_orig
 
-def draw_boxes(frame, detections, model_input_size, label_map, fatigue_classes):
+def draw_boxes(frame, detections, model_input_size, label_map, fatigue_classes, display_size=None):
     """在图像上绘制检测框和标签"""
     global font_cache
     img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -63,16 +63,23 @@ def draw_boxes(frame, detections, model_input_size, label_map, fatigue_classes):
     
     font_cache = globals()['font_cache']
     
+    # 获取显示尺寸
+    if display_size is None:
+        display_size = (frame.shape[0], frame.shape[1])
+    
     for detection in detections:
         x1, y1, x2, y2 = detection["bbox"]
         raw_x1, raw_y1, raw_x2, raw_y2 = detection["raw_bbox"]
         
+        # 坐标已经在后处理中正确缩放到显示尺寸，直接使用
+        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+        
         # 右移20像素
         offset_x = 20
         x1 = max(0, x1 + offset_x)
-        x2 = min(model_input_size[1] - 1, x2 + offset_x)
+        x2 = min(display_size[1] - 1, x2 + offset_x)
         y1 = max(0, y1)
-        y2 = min(model_input_size[0] - 1, y2)
+        y2 = min(display_size[0] - 1, y2)
         
         label_cn = detection["label_cn"]
         conf = detection["confidence"]

@@ -16,7 +16,7 @@
     "apn": "UNINET"
   },
   "timing": {
-    "heartbeat_interval": 60,
+    "heartbeat_interval": 240,
     "gps_interval": 20,
     "event_cooldown": 5,
     "retry_interval": 30

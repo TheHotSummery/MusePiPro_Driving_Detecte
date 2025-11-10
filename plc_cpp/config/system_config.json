@@ -1,0 +1,93 @@
+{
+  "rungs": [
+    {
+      "id": "system_light_1",
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "timer",
+          "timer": "T1",
+          "normally_open": true
+        }
+      ],
+      "action": {
+        "type": "output",
+        "output": "Q3"
+      }
+    },
+    {
+      "id": "system_light_2", 
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "timer",
+          "timer": "T2",
+          "normally_open": true
+        }
+      ],
+      "action": {
+        "type": "output",
+        "output": "Q4"
+      }
+    },
+    {
+      "id": "system_light_3",
+      "enabled": true,
+      "conditions": [
+        {
+          "type": "timer",
+          "timer": "T3",
+          "normally_open": true
+        }
+      ],
+      "action": {
+        "type": "output",
+        "output": "Q5"
+      }
+    },
+    {
+      "id": "system_timer_1",
+      "enabled": true,
+      "conditions": [],
+      "action": {
+        "type": "timer",
+        "timer": "T1"
+      }
+    },
+    {
+      "id": "system_timer_2",
+      "enabled": true,
+      "conditions": [],
+      "action": {
+        "type": "timer",
+        "timer": "T2"
+      }
+    },
+    {
+      "id": "system_timer_3",
+      "enabled": true,
+      "conditions": [],
+      "action": {
+        "type": "timer",
+        "timer": "T3"
+      }
+    }
+  ],
+  "timers": [
+    {
+      "name": "T1",
+      "preset": 2.0,
+      "alias": "系统灯1-2秒间隔"
+    },
+    {
+      "name": "T2",
+      "preset": 1.0,
+      "alias": "系统灯2-1秒间隔"
+    },
+    {
+      "name": "T3",
+      "preset": 0.1,
+      "alias": "系统灯3-0.1秒间隔"
+    }
+  ]
+}

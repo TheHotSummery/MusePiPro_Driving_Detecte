@@ -17,3 +17,4 @@ ultralytics==8.3.169
 pyserial==3.5
 pycryptodome==3.21.0
 schedule==1.2.2
+pymodbus==3.6.3
