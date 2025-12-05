@@ -1,10 +1,10 @@
 {
   "server": {
-    "base_url": "http://spacemit.topcoder.fun",
+    "base_url": "https://spacemit.topcroesus.site",
     "timeout": 30
   },
   "device": {
-    "device_id": "A8888",
+    "device_id": "MUSE_PI_PRO_002",
     "device_type": "Muse Pi Pro Plus",
     "version": "1.0.0",
     "username": "testuser",

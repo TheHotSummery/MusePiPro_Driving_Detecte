@@ -308,7 +308,20 @@ systemctl list-unit-files --state=enabled | grep plc
 - `yolo_config运行逻辑说明.md` - YOLO 联动逻辑说明
 - `CODE_REVIEW_REPORT.md` - 代码审查报告
 - `CRITICAL_FIXES.md` - 关键问题修复方案
+- 
+---
 
+## 许可证
+
+本项目为
+
+---
+
+## 联系方式
+
+如有问题或建议，请联系https://gitee.com/achenjiayi。或者来提出ISSUES？
+
+---
 ## 版本信息
 
 - **版本**: v2.0

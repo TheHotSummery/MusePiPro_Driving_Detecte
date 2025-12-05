@@ -30,6 +30,7 @@ class QuectelEC800M:
         self.apn = apn
         self.ser = None
         self.lock = threading.Lock()
+        self.http_request_lock = threading.Lock()  # 确保HTTP会话全程串行
         self.gnss_is_on = False
         self.time_offset = 0
 
@@ -172,63 +173,106 @@ class QuectelEC800M:
 
     def http_request(self, method, url, data=None, headers=None, context_id=1, timeout=60):
         logging.info(f"--- 准备执行 HTTP(S) {method} 请求到: {url} ---")
-        try:
-            self._check_and_activate_pdp(context_id)
-            self._http_config(url, context_id, headers, data is not None)
-            
-            url_len = len(url)
-            if not self._send_at_command(f'AT+QHTTPURL={url_len},{timeout}', expected_responses=['CONNECT']):
-                raise HttpRequestError("设置URL失败", at_command='AT+QHTTPURL')
-            self.ser.write(url.encode())
-            if not self._read_until_ok(): raise HttpRequestError("输入URL后未收到OK")
-
-            urc_prefix = ''
-            if method.upper() == 'GET':
-                urc_prefix = '+QHTTPGET:'; command = f'AT+QHTTPGET={timeout}'
-                if not self._send_at_command(command): raise HttpRequestError("发送GET命令失败", command)
-            
-            elif method.upper() == 'POST':
-                urc_prefix = '+QHTTPPOST:'
+        with self.http_request_lock:
+            try:
+                # 所有串口操作都通过_send_at_command等方法，它们内部使用lock保护
+                self._check_and_activate_pdp(context_id)
+                self._http_config(url, context_id, headers, data is not None)
                 
-                # --- 【核心修正】 ---
-                # 正确处理 data 为 None 的情况
-                post_data = data.encode('utf-8') if data is not None else b""
-                # --- 修正结束 ---
+                url_len = len(url)
+                # URL设置命令需要等待CONNECT响应，增加超时时间到30秒
+                if not self._send_at_command(f'AT+QHTTPURL={url_len},{timeout}', expected_responses=['CONNECT'], timeout=30):
+                    raise HttpRequestError("设置URL失败", at_command='AT+QHTTPURL')
                 
-                data_len = len(post_data)
-                command = f'AT+QHTTPPOST={data_len},{timeout},{timeout}'
-                if not self._send_at_command(command, expected_responses=['CONNECT']): raise HttpRequestError("发送POST命令失败", command)
-                if data_len > 0: self.ser.write(post_data)
-                if not self._read_until_ok(): raise HttpRequestError("输入POST数据后未收到OK")
-            
-            result_line = self._wait_for_urc(urc_prefix, timeout + 10)
-            if not result_line: raise HttpRequestError(f"等待{method}响应URC超时")
-            err_code, http_status, _ = self._parse_http_urc(result_line)
-            if err_code != 0: raise HttpRequestError(f"{method}请求失败, 模块内部错误码: {err_code}", raw_response=result_line)
-            
-            response_body = self._http_read_response(timeout)
-            
-            return {"status_code": http_status, "body": response_body}
-        finally:
-            self.http_stop()
+                # 发送URL数据（需要在lock保护下）
+                with self.lock:
+                    self.ser.write(url.encode())
+                if not self._read_until_ok(): raise HttpRequestError("输入URL后未收到OK")
+                
+                urc_prefix = ''
+                if method.upper() == 'GET':
+                    urc_prefix = '+QHTTPGET:'; command = f'AT+QHTTPGET={timeout}'
+                    if not self._send_at_command(command): raise HttpRequestError("发送GET命令失败", command)
+                
+                elif method.upper() == 'POST':
+                    urc_prefix = '+QHTTPPOST:'
+                    
+                    # --- 【核心修正】 ---
+                    # 正确处理 data 为 None 的情况
+                    if data is None:
+                        # 如果data为None，发送空JSON对象，避免EC800M不支持data_len=0的情况
+                        post_data = b'{}'
+                    else:
+                        post_data = data.encode('utf-8') if isinstance(data, str) else data
+                    # --- 修正结束 ---
+                    
+                    data_len = len(post_data)
+                    command = f'AT+QHTTPPOST={data_len},{timeout},{timeout}'
+                    
+                    # POST命令需要等待CONNECT响应
+                    # 对于小数据（如2字节的{}），模块可能需要更长时间建立连接
+                    # 增加超时时间到60秒
+                    connect_timeout = max(60, timeout)  # 至少60秒
+                    if not self._send_at_command(command, expected_responses=['CONNECT'], timeout=connect_timeout): 
+                        raise HttpRequestError("发送POST命令失败", command)
+                    
+                    if data_len > 0: 
+                        # 发送POST数据（需要在lock保护下）
+                        with self.lock:
+                            self.ser.write(post_data)
+                        # 等待OK响应，增加超时时间
+                        if not self._read_until_ok(timeout=10): 
+                            raise HttpRequestError("输入POST数据后未收到OK")
+                    # 如果data_len=0，命令可能已经返回OK，不需要额外等待
+                
+                result_line = self._wait_for_urc(urc_prefix, timeout + 10)
+                if not result_line: raise HttpRequestError(f"等待{method}响应URC超时")
+                err_code, http_status, _ = self._parse_http_urc(result_line)
+                if err_code != 0: raise HttpRequestError(f"{method}请求失败, 模块内部错误码: {err_code}", raw_response=result_line)
+                
+                response_body = self._http_read_response(timeout)
+                
+                return {"status_code": http_status, "body": response_body}
+            finally:
+                self.http_stop()
 
     def _http_config(self, url, context_id, headers=None, has_post_data=False):
         if not self._send_at_command(f'AT+QHTTPCFG="contextid",{context_id}'): raise NetworkError("绑定PDP上下文失败")
         if url.lower().startswith('https://'):
             if not self._send_at_command(f'AT+QHTTPCFG="sslctxid",1'): raise NetworkError("绑定SSL上下文失败")
             if not self._send_at_command(f'AT+QSSLCFG="seclevel",1,0'): logging.warning("设置SSL不验证证书失败。")
-        if headers:
-            logging.info(f"配置自定义Headers: {headers}")
-            if not self._send_at_command('AT+QHTTPCFG="requestheader",1'): raise HttpRequestError("启用自定义Header模式失败")
-            for key, value in headers.items():
-                if not self._send_at_command(f'AT+QHTTPCFG="reqheader/add","{key}","{value}"'): raise HttpRequestError(f"添加自定义Header '{key}' 失败")
-            if has_post_data and 'Content-Type' not in headers:
-                if not self._send_at_command('AT+QHTTPCFG="reqheader/add","Content-Type","application/json"'): raise HttpRequestError("自定义模式下添加Content-Type失败")
-        else:
+        
+        # 如果headers为None或空，使用自动Header模式
+        if not headers:
             if not self._send_at_command('AT+QHTTPCFG="requestheader",0'): raise HttpRequestError("切换到自动Header模式失败")
             if has_post_data:
                 logging.info("自动设置Content-Type为application/json。")
                 if not self._send_at_command('AT+QHTTPCFG="contenttype",4'): raise HttpRequestError("设置Content-Type为JSON失败")
+        else:
+            # 使用自定义Header模式（仅当需要时，比如需要特殊的Content-Type）
+            logging.info(f"配置自定义Headers: {headers}")
+            if not self._send_at_command('AT+QHTTPCFG="requestheader",1'): raise HttpRequestError("启用自定义Header模式失败")
+            # 转义header值中的引号（EC800M AT命令要求）
+            def escape_header_value(value):
+                # 将值中的引号转义为两个引号
+                return str(value).replace('"', '""')
+            
+            # 先添加Content-Type（如果存在），确保它在最前面
+            if 'Content-Type' in headers:
+                content_type = escape_header_value(headers['Content-Type'])
+                if not self._send_at_command(f'AT+QHTTPCFG="reqheader/add","Content-Type","{content_type}"'): 
+                    raise HttpRequestError(f"添加Content-Type Header失败")
+            # 然后添加其他headers（但不包括Authorization，因为token通过URL传递）
+            for key, value in headers.items():
+                if key != 'Content-Type' and key != 'Authorization':  # Content-Type已添加，Authorization通过URL传递
+                    escaped_key = escape_header_value(key)
+                    escaped_value = escape_header_value(str(value))
+                    if not self._send_at_command(f'AT+QHTTPCFG="reqheader/add","{escaped_key}","{escaped_value}"'): 
+                        raise HttpRequestError(f"添加自定义Header '{key}' 失败")
+            # 如果有POST数据但Content-Type不在headers中，添加默认的
+            if has_post_data and 'Content-Type' not in headers:
+                if not self._send_at_command('AT+QHTTPCFG="reqheader/add","Content-Type","application/json"'): 
+                    raise HttpRequestError("自定义模式下添加Content-Type失败")
 
     def _http_read_response(self, timeout):
         if not self._send_at_command(f'AT+QHTTPREAD={timeout}', expected_responses=['CONNECT']):
@@ -249,17 +293,25 @@ class QuectelEC800M:
         raise HttpRequestError("读取HTTP响应内容超时", 'AT+QHTTPREAD')
 
     def _wait_for_urc(self, urc_prefix, timeout):
-        start_time = time.time();
-        while time.time() - start_time < timeout:
-            line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-            if line.startswith(urc_prefix): logging.info(f"接收到目标URC <- {line}"); return line
+        """等待URC响应（在lock保护下）"""
+        with self.lock:
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                if line:
+                    logging.info(f"接收 <- {line}")
+                    if line.startswith(urc_prefix): return line
         return None
 
     def _read_until_ok(self, timeout=5):
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-            if line == 'OK': logging.info("接收 <- OK"); return True
+        """读取直到收到OK（在lock保护下）"""
+        with self.lock:
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                if line:
+                    logging.info(f"接收 <- {line}")
+                    if line == 'OK': return True
         return False
     
     def _parse_cme_error(self, response_str):

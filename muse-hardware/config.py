@@ -132,8 +132,8 @@ HARDWARE_WATCHDOG_CONFIG = {
 # 网络模块（EC800M）配置
 # 注意：可以临时禁用网络模块，避免串口操作导致的问题
 NETWORK_MODULE_CONFIG = {
-    "enabled": False,         # 是否启用网络模块（默认False，临时禁用）
-    "skip_gnss": True,        # 是否跳过GNSS初始化
-    "skip_ntp": True,         # 是否跳过NTP时间同步
-    "skip_login": True        # 是否跳过设备登录
+    "enabled": True,         # 是否启用网络模块（默认False，临时禁用）
+    "skip_gnss": False,        # 是否跳过GNSS初始化
+    "skip_ntp": False,         # 是否跳过NTP时间同步
+    "skip_login": False        # 是否跳过设备登录
 }

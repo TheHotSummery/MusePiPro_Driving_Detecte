@@ -38,9 +38,11 @@ class NetworkManager:
         self.last_real_gps_location = None  # 存储最后一次成功获取的真实坐标
         self.gps_failure_count = 0  # GPS获取失败计数
         self.max_gps_failures = 3  # 最大连续失败次数，超过后返回空坐标
-        self.last_heartbeat_time = 0
         self.last_event_time = 0
-        self.last_data_report_time = 0
+        self.last_gps_report_time = 0
+        self.last_status_report_time = 0
+        self.last_data_report_time = 0  # 数据上报时间戳
+        self.login_thread = None  # 登录线程
         
         # 离线存储
         self.offline_queue = deque()
@@ -48,8 +50,8 @@ class NetworkManager:
         self.encryption_key = self._get_or_create_encryption_key()
         
         # 定时任务
-        self.heartbeat_timer = None
         self.gps_timer = None
+        self.status_timer = None
         self.retry_timer = None
         self.scheduler_thread = None
         self.scheduler_running = False
@@ -78,11 +80,11 @@ class NetworkManager:
         """加载配置文件"""
         default_config = {
             "server": {
-                "base_url": "http://spacemit.topcoder.fun",
+                "base_url": "https://spacemit.topcroesus.site",
                 "timeout": 30
             },
             "device": {
-                "device_id": "MUSE_PI_PRO_001",
+                "device_id": "MUSE_PI_PRO_003",
                 "device_type": "Muse Pi Pro Plus",
                 "version": "1.0.0",
                 "username": "testuser",
@@ -94,8 +96,8 @@ class NetworkManager:
                 "apn": "UNINET"
             },
             "timing": {
-                "heartbeat_interval": 240,  # 4分钟
-                "gps_interval": 20,         # 20秒
+                "gps_interval": 20,         # GPS上报间隔20秒
+                "status_interval": 30,      # 状态上报间隔30秒
                 "event_cooldown": 5,        # 事件间隔5秒
                 "retry_interval": 30        # 重试间隔30秒
             },
@@ -360,82 +362,92 @@ class NetworkManager:
             logging.error(f"获取卫星信息失败: {e}")
             return False, f"获取卫星信息失败: {e}", None
     
-    def device_login(self):
-        """设备登录（带超时保护，最多等待30秒）"""
+    def device_login(self, async_mode=True):
+        """设备登录（支持异步模式，不阻塞主程序）"""
         if not self.is_initialized or not self.module:
+            if async_mode:
+                logging.info("模块未初始化，将在后台等待初始化后登录")
+                return False, "模块未初始化"
             return False, "模块未初始化"
         
-        # 检查是否有请求正在进行中
-        if self.request_in_progress:
-            logging.info("网络请求进行中，跳过登录")
-            return False, "网络请求进行中，跳过登录"
-        
-        # 使用线程超时保护，避免长时间阻塞
-        import threading
-        result_container = [None]
-        exception_container = [None]
+        # 如果已有登录线程在运行，不重复启动
+        if self.login_thread and self.login_thread.is_alive():
+            logging.info("登录线程已在运行，跳过重复登录")
+            return False, "登录线程已在运行"
         
         def login_operation():
-            try:
-                # 设置请求进行中标志
-                self.request_in_progress = True
-                
-                url = f"{self.config['server']['base_url']}/api/v1/auth/login"
-                payload = {
-                    "deviceId": self.config["device"]["device_id"],
-                    "deviceType": self.config["device"]["device_type"],
-                    "version": self.config["device"]["version"],
-                    "username": self.config["device"]["username"],
-                    "password": self.config["device"]["password"]
-                }
-                
-                logging.info(f"开始设备登录: {self.config['device']['device_id']}")
-                response = self.module.http_request('POST', url, data=json.dumps(payload))
-                body = response['body']
-                
-                logging.info(f"登录响应: {body}")
-                
-                # 解析响应
-                start_idx = body.find('{')
-                end_idx = body.rfind('}')
-                if start_idx != -1 and end_idx != -1:
-                    json_str = body[start_idx:end_idx+1]
-                    data = json.loads(json_str)
+            max_retries = 3
+            retry_delay = 5  # 重试延迟（秒）
+            
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        logging.info(f"Token获取重试 ({attempt}/{max_retries-1})...")
+                        time.sleep(retry_delay)
                     
-                    if data.get("code") == 200:
-                        self.token = data["data"]["token"]
-                        self.token_expire_time = time.time() + 24 * 3600  # 24小时
-                        logging.info("✅ 设备登录成功")
-                        result_container[0] = (True, "设备登录成功")
+                    logging.info(f"开始设备登录: {self.config['device']['device_id']}")
+                    
+                    # 确保之前的HTTP会话已关闭（避免CME ERROR: 716）
+                    try:
+                        self.module.http_stop()
+                        time.sleep(1)  # 等待1秒让模块完全关闭之前的会话
+                    except:
+                        pass
+                    
+                    # 使用新的Token获取接口
+                    url = f"{self.config['server']['base_url']}/api/v2/auth/token?deviceId={self.config['device']['device_id']}"
+                    
+                    response = self.module.http_request('POST', url, data=None)
+                    body = response['body']
+                    
+                    logging.info(f"Token获取响应: {body}")
+                    
+                    # 解析响应
+                    start_idx = body.find('{')
+                    end_idx = body.rfind('}')
+                    if start_idx != -1 and end_idx != -1:
+                        json_str = body[start_idx:end_idx+1]
+                        data = json.loads(json_str)
+                        
+                        if data.get("code") == 200 and data.get("data") and data["data"].get("token"):
+                            self.token = data["data"]["token"]
+                            expires_in = data["data"].get("expiresIn", 86400)  # 默认24小时
+                            self.token_expire_time = time.time() + expires_in
+                            logging.info(f"✅ Token获取成功，有效期: {expires_in}秒")
+                            return  # 成功，退出重试循环
+                        else:
+                            error_msg = data.get('message', '未知错误')
+                            logging.warning(f"❌ Token获取失败: {error_msg}")
+                            if attempt < max_retries - 1:
+                                continue  # 继续重试
                     else:
-                        logging.warning(f"❌ 登录失败: {data.get('message', '未知错误')}")
-                        result_container[0] = (False, f"登录失败: {data.get('message', '未知错误')}")
-                else:
-                    logging.warning("❌ 登录响应格式错误")
-                    result_container[0] = (False, "响应格式错误")
-            except Exception as e:
-                logging.error(f"设备登录失败: {e}")
-                exception_container[0] = e
-                result_container[0] = (False, f"设备登录失败: {e}")
-            finally:
-                # 确保请求状态标志被重置
-                self.request_in_progress = False
+                        logging.warning("❌ Token响应格式错误")
+                        if attempt < max_retries - 1:
+                            continue  # 继续重试
+                            
+                except Exception as e:
+                    logging.error(f"Token获取失败 (尝试 {attempt+1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        import traceback
+                        logging.debug(f"错误堆栈: {traceback.format_exc()}")
+                        continue  # 继续重试
+                    else:
+                        # 最后一次尝试失败，记录完整错误
+                        import traceback
+                        logging.error(f"Token获取最终失败，错误堆栈: {traceback.format_exc()}")
+            
+            logging.warning("⚠️ Token获取失败，已达到最大重试次数。数据上报功能将使用device_id认证（不依赖token）")
         
-        # 在单独线程中执行，带超时
-        login_thread = threading.Thread(target=login_operation, daemon=True)
-        login_thread.start()
-        login_thread.join(timeout=30.0)  # 最多等待30秒
-        
-        if login_thread.is_alive():
-            logging.warning("设备登录操作超时（已等待30秒），可能网络或串口卡死")
-            self.request_in_progress = False  # 重置标志
-            return False, "登录操作超时"
-        
-        if exception_container[0]:
-            logging.error(f"设备登录异常: {exception_container[0]}")
-            return False, str(exception_container[0])
-        
-        return result_container[0] if result_container[0] else (False, "登录失败")
+        if async_mode:
+            # 异步模式：在后台线程中执行，不阻塞主程序
+            self.login_thread = threading.Thread(target=login_operation, daemon=True)
+            self.login_thread.start()
+            logging.info("登录已在后台线程启动，不阻塞主程序")
+            return True, "登录已在后台启动"
+        else:
+            # 同步模式：在当前线程执行
+            login_operation()
+            return self._check_token_validity(), "登录完成"
     
     def _check_token_validity(self):
         """检查Token有效性"""
@@ -446,6 +458,9 @@ class NetworkManager:
     
     def _api_call(self, method, endpoint, data=None, friendly_name="API调用"):
         """通用API调用方法"""
+        request_id = int(time.time() * 1000)
+        start_time = time.time()
+        logging.info(f"[HTTP-{request_id}] 准备开始 {friendly_name} -> {endpoint}, 当前状态: in_progress={self.request_in_progress}")
         # 检查是否有请求正在进行中
         if self.request_in_progress:
             if data:
@@ -467,26 +482,46 @@ class NetworkManager:
                 logging.info(f"模块未初始化：{friendly_name}数据已缓存")
             return False, f"{friendly_name}失败: 模块未初始化，数据已缓存"
         
-        if not self._check_token_validity():
-            success, message = self.device_login()
-            if not success:
-                # 登录失败时也缓存数据
-                if data:
-                    self._add_to_offline_queue(friendly_name, data)
-                    logging.info(f"登录失败：{friendly_name}数据已缓存")
-                return False, f"{friendly_name}失败: {message}，数据已缓存"
+        # 注意：数据上报不再需要token，直接使用device_id
+        # Token获取仅用于初始化/登录，不作为数据上报的认证
         
         try:
             # 设置请求进行中标志
             self.request_in_progress = True
+            logging.info(f"[HTTP-{request_id}] 标记请求进行中 ({friendly_name})")
             
-            url = f"{self.config['server']['base_url']}{endpoint}?token={self.token}"
-            request_data = json.dumps(data) if data is not None else None
+            # 确保之前的HTTP会话已关闭（避免CME ERROR: 716）
+            try:
+                self.module.http_stop()
+                time.sleep(0.5)  # 等待0.5秒让模块完全关闭之前的会话
+            except:
+                pass  # 如果关闭失败，继续尝试
+            
+            # 使用URL query参数传递device_id（而不是token）
+            from urllib.parse import quote
+            
+            # 构建URL，使用device_id作为query参数
+            base_url = f"{self.config['server']['base_url']}{endpoint}"
+            # 检查URL是否已有参数
+            separator = '&' if '?' in base_url else '?'
+            # 对device_id进行URL编码，确保特殊字符正确处理
+            device_id = self.config['device']['device_id']
+            encoded_device_id = quote(device_id, safe='')
+            url = f"{base_url}{separator}device_id={encoded_device_id}"
+            
+            request_data = json.dumps(data, ensure_ascii=False) if data is not None else None
             
             logging.info(f"发送HTTP请求: {method} {url}")
-            logging.info(f"请求数据: {request_data}")
+            if request_data:
+                logging.info(f"请求数据长度: {len(request_data)} 字节")
+                # 打印前200个字符，避免日志过长
+                preview = request_data[:200] + ("..." if len(request_data) > 200 else "")
+                logging.info(f"请求数据预览: {preview}")
+            else:
+                logging.info("请求数据: None")
             
-            response = self.module.http_request(method, url, data=request_data)
+            # 不再传递headers，token通过URL参数传递
+            response = self.module.http_request(method, url, data=request_data, headers=None)
             body = response['body']
             
             logging.info(f"HTTP响应: {body}")
@@ -499,16 +534,12 @@ class NetworkManager:
                 parsed_json = json.loads(json_str)
                 
                 if parsed_json.get("code") == 200:
-                    logging.info(f" {friendly_name}成功")
+                    logging.info(f"✅ {friendly_name}成功")
                     return True, f"{friendly_name}成功"
-                elif parsed_json.get("code") == 401:
-                    # Token无效，重新登录
-                    self.token = None
-                    logging.warning(" Token无效，需要重新登录")
-                    return False, "Token无效，需要重新登录"
                 else:
-                    logging.warning(f" {friendly_name}失败: {parsed_json.get('message', '未知错误')}")
-                    return False, f"{friendly_name}失败: {parsed_json.get('message', '未知错误')}"
+                    error_msg = parsed_json.get('message', '未知错误')
+                    logging.warning(f"❌ {friendly_name}失败: {error_msg}")
+                    return False, f"{friendly_name}失败: {error_msg}"
             else:
                 logging.warning(f" {friendly_name}失败: 响应格式错误")
                 return False, f"{friendly_name}失败: 响应格式错误"
@@ -522,46 +553,23 @@ class NetworkManager:
         finally:
             # 确保请求状态标志被重置
             self.request_in_progress = False
+            cost = time.time() - start_time
+            logging.info(f"[HTTP-{request_id}] {friendly_name}结束，耗时 {cost:.2f}s，状态标志已清理")
     
     def device_online(self):
-        """设备上线"""
-        return self._api_call('GET', '/api/v1/device/online', None, "设备上线")
+        """V2后台不再需要显式上线接口"""
+        logging.info("设备上线接口已废弃，由后台通过数据上报判定在线状态，跳过实际请求。")
+        return True, "设备上线接口已废弃，已跳过"
     
     def device_offline(self):
-        """设备离线"""
-        return self._api_call('GET', '/api/v1/device/offline', None, "设备离线")
+        """V2后台不再需要显式离线接口"""
+        logging.info("设备离线接口已废弃，由后台通过超时机制判定，跳过实际请求。")
+        return True, "设备离线接口已废弃，已跳过"
     
     def send_heartbeat(self):
-        """发送心跳（带超时保护，最多等待20秒）"""
-        payload = {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec='seconds') + 'Z'
-        }
-        # 使用线程超时保护，避免长时间阻塞
-        import threading
-        result_container = [None]
-        exception_container = [None]
-        
-        def heartbeat_operation():
-            try:
-                result_container[0] = self._api_call('POST', '/api/v1/device/heartbeat', payload, "发送心跳")
-            except Exception as e:
-                exception_container[0] = e
-                result_container[0] = (False, f"发送心跳失败: {e}")
-        
-        # 在单独线程中执行，带超时
-        heartbeat_thread = threading.Thread(target=heartbeat_operation, daemon=True)
-        heartbeat_thread.start()
-        heartbeat_thread.join(timeout=20.0)  # 最多等待20秒
-        
-        if heartbeat_thread.is_alive():
-            logging.warning("发送心跳操作超时（已等待20秒），可能网络或串口卡死")
-            return False, "心跳发送超时"
-        
-        if exception_container[0]:
-            logging.error(f"发送心跳异常: {exception_container[0]}")
-            return False, str(exception_container[0])
-        
-        return result_container[0] if result_container[0] else (False, "心跳发送失败")
+        """V2后台已取消心跳接口"""
+        logging.info("心跳接口已废弃，依赖 GPS/事件定期上报判定在线状态，跳过请求。")
+        return True, "心跳接口已废弃，已跳过"
     
     def report_event_data(self, behavior_data=None):
         """上报事件数据"""
@@ -664,47 +672,81 @@ class NetworkManager:
             }
         }
         
-        payload = {
+        # 获取时间戳（毫秒）
+        if self.module and hasattr(self.module, 'get_accurate_timestamp'):
+            timestamp_ms = int(self.module.get_accurate_timestamp() * 1000)
+        else:
+            timestamp_ms = int(time.time() * 1000)
+        
+        # 按照API规范构建统一格式的数据
+        event_data = {
             "eventId": event_id,
-            "timestamp": current_time.isoformat(),
-            "eventType": event_type,
-            "severity": severity,
+            "level": alert_level,
+            "score": round(progress_score, 2),
+            "behavior": behavior,
+            "confidence": round(behavior_data.get("confidence", 0.85), 2),
+            "duration": round(behavior_data.get("duration", 0.0), 2),
             "locationLat": lat,
             "locationLng": lng,
-            "behavior": behavior,
-            "confidence": behavior_data.get("confidence", 0.85),
-            "duration": behavior_data.get("duration", 0.0),  # 持续时间
-            "alertLevel": alert_level,  # 告警级别
-            "gpioTriggered": json.dumps(gpio_triggered),  # GPIO触发信息(JSON字符串)
-            "context": json.dumps(context)  # 上下文信息(JSON字符串)
+            "distractedCount": behavior_data.get("distracted_count", 0)
         }
         
-        return self._api_call('POST', '/api/v1/data/event', payload, "上报事件数据")
+        # 统一接口格式
+        payload = {
+            "dataType": "event",
+            "timestamp": timestamp_ms,
+            "data": event_data
+        }
+        
+        return self._api_call('POST', '/api/v2/data/report', payload, "上报事件数据")
     
     def report_gps_data(self, fatigue_data=None):
-        """上报GPS数据"""
+        """上报GPS数据（使用统一接口 /api/v2/data/report）"""
         if not fatigue_data:
             fatigue_data = self.config["default_data"]
         
         # 获取GPS坐标
         gps_success, gps_msg, location = self.get_gps_location()
         if location:
-            # 构建原始GPS数据字符串
-            raw_gps_data = self._construct_raw_gps_string(location)
+            lat = location['wgs84']['latitude']
+            lng = location['wgs84']['longitude']
+            speed = location.get('speed_kmh', 0.0)  # km/h
+            direction = location.get('heading', 0.0)  # 方向角（度）
+            altitude = location.get('altitude_m', 0.0)  # 海拔（米）
+            satellites = location.get('satellites_in_use', 0)  # 卫星数量
         else:
-            # GPS获取失败，返回空字符串，让后端判断
-            raw_gps_data = ""
+            # GPS获取失败，返回空坐标
+            lat = None
+            lng = None
+            speed = None
+            direction = None
+            altitude = None
+            satellites = None
         
-        payload = {
-            "raw_gps_data": raw_gps_data,
-            "fatigue_score": fatigue_data.get("fatigue_score", 0.85),
-            "eye_blink_rate": fatigue_data.get("eye_blink_rate", 0.45),
-            "head_movement_score": fatigue_data.get("head_movement_score", 0.32),
-            "yawn_count": fatigue_data.get("yawn_count", 2),
-            "attention_score": fatigue_data.get("attention_score", 0.78)
+        # 获取时间戳（毫秒）
+        if self.module and hasattr(self.module, 'get_accurate_timestamp'):
+            timestamp_ms = int(self.module.get_accurate_timestamp() * 1000)
+        else:
+            timestamp_ms = int(time.time() * 1000)
+        
+        # 按照API规范构建统一格式的GPS数据
+        gps_data = {
+            "locationLat": lat,
+            "locationLng": lng,
+            "speed": round(speed, 1) if speed is not None else None,
+            "direction": round(direction, 1) if direction is not None else None,
+            "altitude": round(altitude, 1) if altitude is not None else None,
+            "satellites": satellites
         }
         
-        return self._api_call('POST', '/api/v1/data/gps', payload, "上报GPS数据")
+        # 统一接口格式
+        payload = {
+            "dataType": "gps",
+            "timestamp": timestamp_ms,
+            "data": gps_data
+        }
+        
+        return self._api_call('POST', '/api/v2/data/report', payload, "上报GPS数据")
     
     def _construct_raw_gps_string(self, location_data):
         """构建原始GPS数据字符串"""
@@ -808,7 +850,6 @@ class NetworkManager:
         """启动定时任务"""
         try:
             # 设置定时任务
-            schedule.every(self.config["timing"]["heartbeat_interval"]).seconds.do(self._scheduled_heartbeat)
             schedule.every(self.config["timing"]["gps_interval"]).seconds.do(self._scheduled_gps_update)
             schedule.every(self.config["timing"]["retry_interval"]).seconds.do(self._scheduled_retry_offline)
             
@@ -830,25 +871,6 @@ class NetworkManager:
             except Exception as e:
                 logging.error(f"调度器运行异常: {e}")
                 time.sleep(5)
-    
-    def _scheduled_heartbeat(self):
-        """定时心跳任务"""
-        try:
-            if self.offline_mode:
-                logging.debug("跳过定时心跳：离线模式")
-                return
-            
-            if self.is_initialized and self._check_token_validity():
-                logging.info("开始定时心跳发送...")
-                success, message = self.send_heartbeat()
-                if success:
-                    logging.info(f"✅ 定时心跳发送成功: {message}")
-                else:
-                    logging.warning(f"❌ 定时心跳发送失败: {message}")
-            else:
-                logging.debug("跳过定时心跳：模块未初始化或Token无效")
-        except Exception as e:
-            logging.error(f"定时心跳任务异常: {e}")
     
     def _scheduled_gps_update(self):
         """定时GPS更新任务"""
@@ -912,7 +934,9 @@ class NetworkManager:
                 
                 # 根据数据类型重发
                 if item["type"] == "发送心跳":
-                    success, message = self.send_heartbeat()
+                    logging.info("离线队列包含已废弃的心跳任务，直接跳过。")
+                    self.offline_queue.popleft()
+                    continue
                 elif item["type"] == "上报事件数据":
                     success, message = self.report_event_data(item["data"])
                 elif item["type"] == "上报GPS数据":
@@ -1027,11 +1051,10 @@ class NetworkManager:
             # 取消定时任务
             schedule.clear()
             
-            if self.heartbeat_timer:
-                self.heartbeat_timer.cancel()
-            if self.gps_timer:
+            # 注意：已移除heartbeat_timer，不再需要清理
+            if hasattr(self, 'gps_timer') and self.gps_timer:
                 self.gps_timer.cancel()
-            if self.retry_timer:
+            if hasattr(self, 'retry_timer') and self.retry_timer:
                 self.retry_timer.cancel()
             
             if self.module:

@@ -49,8 +49,13 @@ class PLCBridge:
 
         self._client: Optional[ModbusTcpClient] = None
         self._client_lock = threading.Lock()
+        self._io_lock = threading.Lock()
         self._available = False
         self._current_level = "Normal"
+        
+        # 测试线圈定时写入
+        self._test_coil_thread: Optional[threading.Thread] = None
+        self._test_coil_running = False
 
         # 不再自动启动 PLC 进程
         # 如果需要测试连接，可以调用 test_connection()
@@ -254,8 +259,56 @@ class PLCBridge:
             logging.error("M%d 写入失败", index)
         return result if result is not None else False
 
+    def start_test_coil(self, address: int = 45, value: bool = True, interval: float = 0.005) -> None:
+        """启动定时写入测试线圈（地址=45，值=True，周期=5ms）
+        
+        Args:
+            address: 线圈地址，默认45
+            value: 写入值，默认True
+            interval: 写入周期（秒），默认0.005（5ms）
+        """
+        if self._test_coil_running:
+            logging.warning("测试线圈定时写入已在运行")
+            return
+        
+        self._test_coil_running = True
+        logging.info("启动测试线圈定时写入：地址=%d, 值=%s, 周期=%.3f秒", address, value, interval)
+        
+        def write_test_coil_loop():
+            next_run = time.perf_counter()
+            while self._test_coil_running:
+                try:
+                    # 直接调用 _write_coils，不再追加读取验证
+                    self._write_coils(address, [value])
+                except Exception as e:
+                    logging.warning("测试线圈写入异常: %s", e)
+                next_run += interval
+                sleep_time = next_run - time.perf_counter()
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                else:
+                    # 线程调度被抢占时，立即进入下一次循环
+                    next_run = time.perf_counter()
+        
+        self._test_coil_thread = threading.Thread(target=write_test_coil_loop, daemon=True)
+        self._test_coil_thread.start()
+    
+    def stop_test_coil(self) -> None:
+        """停止测试线圈定时写入"""
+        if not self._test_coil_running:
+            return
+        
+        self._test_coil_running = False
+        if self._test_coil_thread and self._test_coil_thread.is_alive():
+            self._test_coil_thread.join(timeout=1.0)
+        self._test_coil_thread = None
+        logging.info("测试线圈定时写入已停止")
+
     def stop(self) -> None:
         """关闭 Modbus 客户端（不管理 PLC 进程）。"""
+        
+        # 停止测试线圈定时写入
+        self.stop_test_coil()
 
         with self._client_lock:
             if self._client:
@@ -389,19 +442,22 @@ class PLCBridge:
                 client.timeout = self._write_timeout
                 logging.debug("Modbus 客户端超时设置为 %.2f 秒", self._write_timeout)
 
-        # 在锁外执行写入操作，避免长时间持有锁
+        # 在独立锁内执行写入，避免多个线程同时操作同一个 socket
         try:
-            logging.info("调用 write_coils，地址=%d, 值=%s, 单元ID=%d", address, list(values), self._unit_id)
-            # pymodbus 3.x 版本中，write_coils 不再接受 unit 参数
-            # unit ID 应该在创建客户端时设置，或通过 slave 参数传递
-            # 尝试使用 slave 参数，如果不行则直接调用
-            try:
-                response = client.write_coils(address, list(values), slave=self._unit_id)
-            except TypeError:
-                # 如果 slave 参数也不支持，直接调用（使用默认 unit ID）
-                response = client.write_coils(address, list(values))
-            write_time = time.time() - write_start
-            logging.info("write_coils 调用完成，耗时 %.3f 秒", write_time)
+            with self._io_lock:
+                logging.info("调用 write_coils，地址=%d, 值=%s, 单元ID=%d", address, list(values), self._unit_id)
+                # pymodbus 3.x 版本中，write_coils 不再接受 unit 参数
+                # unit ID 应该在创建客户端时设置，或通过 slave 参数传递
+                # 尝试使用 slave 参数，如果不行则直接调用
+                try:
+                    response = client.write_coils(address, list(values), slave=self._unit_id)
+                except TypeError:
+                    # 如果 slave 参数也不支持，直接调用（使用默认 unit ID）
+                    response = client.write_coils(address, list(values))
+                write_time = time.time() - write_start
+                logging.info("write_coils 调用完成，耗时 %.3f 秒", write_time)
+                # 不再验证，只记录日志
+                logging.info("线圈写入完成：地址=%d, 值=%s, 单元ID=%d", address, list(values), self._unit_id)
         except ModbusException as exc:
             write_time = time.time() - write_start
             logging.error("写入 PLC Modbus 线圈失败（耗时 %.3f 秒）: %s", write_time, exc)
@@ -436,38 +492,8 @@ class PLCBridge:
         total_time = time.time() - write_start
         logging.info("线圈写入成功，总耗时 %.3f 秒", total_time)
         
-        # 验证写入：读取刚写入的线圈值
-        try:
-            verify_start = time.time()
-            # pymodbus 3.x 的 read_coils API 兼容性处理
-            # 新版本可能只接受 2 个位置参数：address, count
-            # unit_id 在创建客户端时已设置，不需要在 read_coils 中指定
-            try:
-                # 首先尝试只使用位置参数（pymodbus 3.x 标准方式）
-                read_response = client.read_coils(address, len(values))
-            except TypeError as e1:
-                # 如果失败，尝试使用关键字参数
-                try:
-                    read_response = client.read_coils(address=address, count=len(values))
-                except TypeError as e2:
-                    # 如果都失败，跳过验证（不影响写入操作）
-                    logging.debug("read_coils API 不兼容，跳过验证: %s, %s", e1, e2)
-                    return True
-            
-            if not read_response.isError():  # type: ignore[has-type]
-                read_values = read_response.bits[:len(values)]  # type: ignore[has-type]
-                if read_values == list(values):
-                    verify_time = time.time() - verify_start
-                    logging.info("写入验证成功：读取值 %s 与写入值一致（验证耗时 %.3f 秒）", read_values, verify_time)
-                else:
-                    verify_time = time.time() - verify_start
-                    logging.warning("写入验证失败：读取值 %s 与写入值 %s 不一致（验证耗时 %.3f 秒）", 
-                                 read_values, list(values), verify_time)
-                    logging.warning("提示：可能PLC配置使用的M位与写入的M位不匹配")
-            else:
-                logging.warning("写入验证：读取线圈失败，无法验证写入结果")
-        except Exception as e:
-            logging.warning("写入验证时出错: %s", e)
+        # 不再验证写入，只记录日志
+        logging.info("调用 write_coils，地址=%d, 值=%s, 单元ID=%d", address, list(values), self._unit_id)
         
         return True
 

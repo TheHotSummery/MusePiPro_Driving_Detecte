@@ -53,6 +53,13 @@ class WebServer:
         self.network_manager = NetworkManager()
         self.video_processor = VideoProcessor(self.gpio_controller, self.socketio, self.network_manager)
         
+        # 启动时立即开始视频处理（用于测试，无需前端访问）
+        try:
+            self.video_processor.start_processing_thread(source="webcam", device_index=20)
+            logging.info("启动时已自动开启视频处理线程（/dev/video20）")
+        except Exception as e:
+            logging.error(f"启动自动视频处理失败: {e}")
+        
         # YOLO 心跳线程标志
         self._yolo_heartbeat_running = False
         self._yolo_heartbeat_thread = None
@@ -490,7 +497,8 @@ class WebServer:
                 host=WEB_CONFIG["host"], 
                 port=WEB_CONFIG["port"], 
                 debug=WEB_CONFIG["debug"],
-                use_reloader=WEB_CONFIG.get("use_reloader", False)
+                use_reloader=WEB_CONFIG.get("use_reloader", False),
+                allow_unsafe_werkzeug=True  # 允许在 systemd 等生产环境使用内置服务器（测 试环境专用）
                 # 注意：Flask-SocketIO 已经默认设置了 threaded=True，不需要重复传递
             )
         except Exception as e:

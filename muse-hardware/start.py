@@ -148,16 +148,21 @@ def main():
                         print(" NTP时间同步已跳过")
                         logging.info("NTP时间同步已跳过")
                     
-                    # 尝试设备登录（如果未跳过）
+                    # 尝试设备登录（如果未跳过）- 在后台线程中执行，不阻塞主程序
+                    # 注意：Token获取仅用于初始化，数据上报使用device_id认证，不依赖token
                     if not NETWORK_MODULE_CONFIG.get("skip_login", False):
-                        print(" 正在尝试设备登录...")
-                        success, message = network_manager.device_login()
+                        print(" 正在后台启动设备登录（不阻塞主程序）...")
+                        print(" 提示：Token获取仅用于初始化，数据上报使用device_id认证")
+                        # 等待几秒让模块完全初始化，避免HTTP会话冲突
+                        time.sleep(3)
+                        success, message = network_manager.device_login(async_mode=True)
                         if success:
-                            print(" 设备登录成功")
-                            logging.info("设备登录成功")
+                            print(" 设备登录已在后台启动")
+                            logging.info("设备登录已在后台启动")
                         else:
-                            print(f" 设备登录失败: {message}")
-                            logging.warning(f"设备登录失败: {message}")
+                            print(f" 设备登录启动失败: {message}")
+                            print(" 提示：数据上报功能不依赖token，将使用device_id认证")
+                            logging.warning(f"设备登录启动失败: {message}")
                     else:
                         print(" 设备登录已跳过")
                         logging.info("设备登录已跳过")
