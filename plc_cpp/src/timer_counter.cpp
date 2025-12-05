@@ -11,8 +11,16 @@ Timer::Timer(const std::string& name, double preset, const std::string& alias)
 
 bool Timer::update(bool enable, double delta_time) {
     (void)delta_time;
-    double now = std::chrono::duration<double>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+    // 【修复】添加异常处理，防止 chrono 操作抛出异常
+    double now = 0.0;
+    try {
+        now = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    } catch (const std::exception& e) {
+        // 如果获取时间失败，使用 delta_time 作为备用
+        std::cerr << "[TIMER] 获取时间失败: " << e.what() << std::endl;
+        now = delta_time;  // 使用传入的 delta_time 作为备用值
+    }
     
     if (enable) {
         if (!running_.load()) {

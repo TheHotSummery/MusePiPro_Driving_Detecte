@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLC配置系统</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.prod.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.4.0/axios.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #edf0fd 0%, #f5effa 100%); /* 浅灰渐变背景，替换蓝紫色 */
+            min-height: 100vh; 
+        }
+        #app { padding: 20px; max-width: 1400px; margin: 0 auto; }
+        .header {
+			background: white;
+			border-radius: 12px;
+			padding: 24px;
+			margin-bottom: 20px;
+			box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+			/* --- 新增 --- */
+			position: sticky;
+			top: 0;
+			z-index: 10;
+		}.header h1 { color: #2d3748; font-size: 28px; margin-bottom: 16px; }
+        .toolbar { display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; gap: 6px; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .btn-primary { background: #4299e1; color: white; }
+        .btn-success { background: #48bb78; color: white; }
+        .btn-warning { background: #ed8936; color: white; }
+        .btn-danger { background: #f56565; color: white; }
+        .btn-secondary { background: #718096; color: white; }
+        .main-content { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+        .sidebar { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); height: fit-content; position: sticky; top: 20px; }
+        .sidebar-section { margin-bottom: 24px; }
+        .sidebar-section h3 { color: #2d3748; font-size: 16px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
+        .resource-item { background: #f7fafc; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #4299e1; }
+        .resource-item input { width: 100%; padding: 6px; border: 1px solid #cbd5e0; border-radius: 4px; margin-top: 6px; font-size: 13px; }
+        .resource-label { display: flex; justify-content: space-between; align-items: center; font-weight: 600; color: #2d3748; margin-bottom: 4px; }
+        .resource-alias { font-size: 12px; color: #718096; font-weight: normal; }
+        .editor-area { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .rung-card { background: #f7fafc; border: 2px solid #e2e8f0; border-radius: 12px; padding: 12px 20px; margin-bottom: 10px; transition: all 0.3s; }
+        .rung-card:hover { border-color: #4299e1; box-shadow: 0 4px 12px rgba(66, 153, 225, 0.15); }
+        .rung-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 18px; border-bottom: 2px solid #e2e8f0; }
+        .rung-title { font-size: 18px; font-weight: 700; color: #2d3748; }
+        .rung-actions { display: flex; gap: 8px; }
+        .icon-btn { width: 32px; height: 32px; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 16px; }
+        .icon-btn:hover { transform: scale(1.1); }
+        .section-title { font-size: 14px; font-weight: 600; color: #4a5568; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .section-title::before { content: ''; width: 4px; height: 16px; background: #4299e1; border-radius: 2px; }
+        .conditions-area { background: white; padding: 16px; border-radius: 8px; margin-bottom: 16px; border: 2px dashed #cbd5e0; }
+        .condition-row { display: grid; grid-template-columns: 140px 1fr 120px 40px; gap: 12px; align-items: center; margin-bottom: 8px; padding:8px 12px; background: #f7fafc; border-radius: 8px; border-left: 3px solid #48bb78; }
+        .action-row { display: grid; grid-template-columns: 180px 1fr; gap: 12px; align-items: center; padding: 12px; background: #fff5f5; border-radius: 8px; border-left: 4px solid #f56565; }
+        select, input[type="number"], input[type="text"] { padding: 8px 12px; border: 2px solid #e2e8f0; border-radius: 6px; font-size: 14px; transition: border-color 0.2s; }
+        select:focus, input:focus { outline: none; border-color: #4299e1; }
+        .checkbox-label {
+			display: flex;
+			align-items: center;
+			gap: 8px; /* 增大间距 */
+			font-size: 13px;
+			color: #4a5568;
+			cursor: pointer; /* 让整个标签都可点击 */
+		}
+		.checkbox-label input[type="checkbox"] {
+			transform: scale(1.5); /* 放大到1.5倍 */
+			margin: 0 4px; /* 调整边距以适应放大 */
+		}
+        .empty-state { text-align: center; padding: 60px 20px; color: #718096; }
+        .empty-state-icon { font-size: 64px; margin-bottom: 16px; opacity: 0.3; }
+        .add-condition-btn { width: 100%; padding: 10px; background: #edf2f7; border: 2px dashed #cbd5e0; border-radius: 8px; color: #4a5568; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .add-condition-btn:hover { background: #e2e8f0; border-color: #4299e1; color: #2d3748; }
+        .help-text { font-size: 12px; color: #718096; margin-top: 4px; font-style: italic; }
+        .status-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-ok { background: #c6f6d5; color: #22543d; }
+        .status-error { background: #fed7d7; color: #742a2a; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-content { background: white; border-radius: 12px; padding: 24px; max-width: 600px; max-height: 80vh; overflow-y: auto; }
+        .resource-input-group { margin-bottom: 16px; }
+        .resource-input-group label { display: block; margin-bottom: 6px; font-weight: 600; color: #2d3748; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- 头部工具栏：保留预览梯形图按钮 -->
+        <div class="header">
+            
+            <div class="toolbar"><h2>PLC配置系统</h1>
+                <button class="btn btn-danger" @click="showPreviewModal = true">📊 预览梯形图</button>
+                <button class="btn btn-primary" @click="addRung">➕ 添加梯级</button>
+                <button class="btn btn-success" @click="showAddTimer = true">⏱️ 添加定时器</button>
+                <button class="btn btn-success" @click="showAddCounter = true">🔢 添加计数器</button>
+                <button class="btn btn-warning" @click="saveConfig">💾 保存配置</button>
+                <button class="btn btn-secondary" @click="downloadConfig">⬇️ 下载</button>
+                <label class="btn btn-secondary" style="margin: 0;">
+                    ⬆️ 上传
+                    <input type="file" @change="loadConfig" accept=".json" style="display:none">
+                </label>
+            </div>
+        </div>
+
+        <!-- 主内容区域 -->
+        <div class="main-content">
+            <!-- 左侧资源面板：整合I/O说明与帮助说明 -->
+            <div class="sidebar">
+                <!-- 定时器资源 -->
+                <div class="sidebar-section">
+                    <h3> 定时器 ({{ config.timers.length }})</h3>
+                    <div v-for="(timer, idx) in config.timers" :key="'t'+idx" class="resource-item">
+                        <div class="resource-label">
+                            <span>{{ timer.name }}</span>
+                            <button class="icon-btn" style="background:#f56565;color:white" @click="removeResource('timers', idx)">🗑️</button>
+                        </div>
+                        <input v-model="timer.alias" placeholder="别名（如：加热延时）" />
+                        <input type="number" v-model.number="timer.preset" step="0.1" min="0.2" placeholder="预设时间（秒）" @change="validateTimerPreset(idx)" />
+                        <div class="help-text">{{ timer.preset }}秒后完成位ON</div>
+                    </div>
+                </div>
+
+                <!-- 计数器资源 -->
+                <div class="sidebar-section">
+                    <h3>计数器 ({{ config.counters.length }})</h3>
+                    <div v-for="(counter, idx) in config.counters" :key="'c'+idx" class="resource-item">
+                        <div class="resource-label">
+                            <span>{{ counter.name }}</span>
+                            <button class="icon-btn" style="background:#f56565;color:white" @click="removeResource('counters', idx)">🗑️</button>
+                        </div>
+                        <input v-model="counter.alias" placeholder="别名（如：产品计数）" />
+                        <input type="number" v-model.number="counter.preset" placeholder="预设计数" @change="validateCounterPreset(idx)" />
+                        <div class="help-text">计数{{ counter.preset }}次后完成位ON</div>
+                    </div>
+                </div>
+
+            <!-- [修改] I/O & M位 说明 -->
+            <div class="sidebar-section">
+                <h3>I/O & M位说明</h3>
+                <div style="font-size:13px;color:#4a5568;line-height:1.6">
+                    <p><strong>输入 (I)</strong>: I0, I1, I2</p>
+                    <p style="line-height:1.2; font-size:12px; color:#718096;">物理输入信号</p>
+                    <hr style="margin: 8px 0;">
+
+                    <p><strong>用户输出 (Q)</strong>: Q0, Q1, Q2, Q3, Q4, Q5</p>
+                    <p style="line-height:1.2; font-size:12px; color:#718096;">用户可自由控制的物理输出（共6路）</p>
+                    <hr style="margin: 8px 0;">
+
+                    <p><strong>中间继电器 (M)</strong></p>
+                    <p><strong>M0-M39</strong>: <strong style="color: #2b6cb0;">用户区 (可读写)</strong></p>
+                    <p style="line-height:1.2; font-size:12px; color:#718096;">用于存储用户程序的中间逻辑状态。</p>
+                    
+                    <p style="margin-top:8px"><strong>M40-M45</strong>: <strong style="color: #c53030;">系统区 (YOLO, 只读)</strong></p>
+                    <p style="line-height:1.2; font-size:12px; color:#718096;">由AI系统写入，反映检测结果，用户只能读取。</p>
+                    
+                    <p style="margin-top:8px"><strong>M46</strong>: <strong style="color: #c53030;">预留</strong></p>
+                    <p style="line-height:1.2;font-size:12px;color:#718096">系统预留位。</p>
+                </div>
+            </div>
+
+                <!-- 帮助与技术说明：保留旧代码的折叠功能 -->
+                <div class="sidebar-section">
+                    <h3 @click="isHelpVisible = !isHelpVisible" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+                        <span>帮助与技术说明</span>
+                        <span style="font-size: 18px; transition: transform 0.3s;" :style="{ transform: isHelpVisible ? 'rotate(180deg)' : 'rotate(0deg)' }">▼</span>
+                    </h3>
+                    <div v-if="isHelpVisible" style="font-size: 13px; color: #4a5568; line-height: 1.7; padding-top: 12px;">
+                        <!-- 常开/常闭说明 -->
+                        <p style="margin-bottom: 12px;">
+                            <strong>常开/常闭触点 (NO/NC):</strong>
+                            <ul style="list-style-position: inside; padding-left: 8px;">
+                                <li><strong>常开 (Normally Open):</strong> 当物理信号为"ON"(高电平)时，条件为<strong style="color: #22543d;">真</strong>。例如：IF (输入I0为ON) THEN...</li>
+                                <li><strong>常闭 (Normally Closed):</strong> 当物理信号为"OFF"(低电平)时，条件为<strong style="color: #22543d;">真</strong>。它是对物理信号的"取反"。例如：IF (输入I0为OFF) THEN...</li>
+                            </ul>
+                        </p>
+                        <!-- 定时器说明 -->
+						<!-- 定时器说明 (修正版) -->
+						<p style="margin-bottom: 12px;">
+							<strong>定时器 (Timer):</strong>
+							<ul style="list-style-position: inside; padding-left: 8px;">
+								<li><strong>触发方式 (TON):</strong> 这是一个标准的"通电延时定时器"。当"启动定时器"动作的条件为<strong style="color: #22543d;">真</strong>时，定时器开始计时。只要条件保持为"真"，计时就会继续。</li>
+								<li><strong>完成状态 (DN):</strong> 当累计时间达到预设值，定时器的"完成位(DN)"将变为"ON"，并**保持ON状态**，直到定时器被复位。</li>
+								<li><strong>复位机制 (Reset):</strong> 定时器**不会自动复位**其"完成位(DN)"，它通过以下两种方式复位：
+									<ol style="list-style-type: decimal; padding-left: 20px; margin-top: 4px;">
+										<li><strong>隐式复位:</strong> 当"启动定时器"的条件从"真"变为"假"时，定时器将**自动停止计时并清零累计时间**，其"完成位(DN)"也随之变为"OFF"。</li>
+										<li><strong>显式复位:</strong> 当"复位定时器"动作的条件为"真"时，定时器将被**强制清零**，无论其启动条件是否为真。</li>
+									</ol>
+								</li>
+							</ul>
+						</p>
+                        <!-- 计数器说明 -->
+                        <p style="margin-bottom: 12px;">
+                            <strong>计数器 (Counter):</strong>
+                            <ul style="list-style-position: inside; padding-left: 8px;">
+                                <li><strong>触发方式:</strong> 采用**上升沿触发**，仅在条件从"假"变"真"时计数+1，条件持续为"真"不重复计数。</li>
+                                <li><strong>完成状态 (DN):</strong> 计数值达到预设值时，"完成位(DN)"变"ON"并保持，直到复位。</li>
+                                <li><strong>复位机制:</strong> 计数器**不会自动复位**，必须通过"复位计数器"动作清零。</li>
+                            </ul>
+                        </p>
+                        <!-- 执行逻辑说明 -->
+                        <p>
+                            <strong>程序执行逻辑:</strong>
+                            <ul style="list-style-position: inside; padding-left: 8px;">
+                                <li>程序从**梯级1**开始，按顺序**从上到下**扫描执行，梯级顺序影响输出结果，需合理排序。</li>
+                            </ul>
+                        </p>
+                        <p>
+                            <strong>多输出说明:</strong>
+                            <ul style="list-style-position: inside; padding-left: 8px;">
+                                <li>同一组条件控制多个输出时，需为每个输出创建独立梯级并复制条件。</li>
+                            </ul>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧梯级编辑器：整合新旧代码逻辑优化 -->
+            <div class="editor-area">
+                <div v-if="config.rungs.length === 0" class="empty-state">
+                    <div class="empty-state-icon">📝</div>
+                    <h3>还没有梯级程序</h3>
+                    <p>点击"添加梯级"开始创建您的PLC程序</p>
+                </div>
+
+                <div v-for="(rung, rungIdx) in config.rungs" :key="rung.id" class="rung-card">
+                    <!-- 梯级头部 -->
+                    <div class="rung-header">
+                        <div class="rung-title">梯级 {{ rungIdx + 1 }}</div>
+                        <div class="rung-actions">
+                            <button class="icon-btn" style="background:#4299e1;color:white" @click="moveRungUp(rungIdx)" :disabled="rungIdx === 0">⬆️</button>
+                            <button class="icon-btn" style="background:#4299e1;color:white" @click="moveRungDown(rungIdx)" :disabled="rungIdx === config.rungs.length - 1">⬇️</button>
+                            <button class="icon-btn" style="background:#f56565;color:white" @click="deleteRung(rungIdx)">🗑️</button>
+                        </div>
+                    </div>
+
+                    <!-- 条件区域：保留中间继电器类型，修复显示逻辑 -->
+                    <div>
+                        <div class="section-title">🔍 触发条件（所有条件必须同时满足）</div>
+                        <div class="conditions-area">
+                            <div v-if="rung.conditions.length === 0" style="text-align:center;color:#718096;padding:20px">
+                                <p>暂无条件（默认为真）</p>
+                                <p style="font-size:12px;margin-top:8px">添加条件来控制此梯级的执行</p>
+                            </div>
+
+                            <div v-for="(cond, condIdx) in rung.conditions" :key="'cond'+condIdx" class="condition-row">
+                                <!-- 条件类型：增加中间继电器选项 -->
+                                <select v-model="cond.type" @change="onConditionTypeChange(rung, cond)">
+                                    <option value="input">📥 输入</option>
+                                    <option value="output">📤 输出</option>
+                                    <option value="memory">💾 中间继电器 (M)</option>
+                                    <option value="timer">⏱️ 定时器</option>
+                                    <option value="counter">🔢 计数器</option>
+                                </select>
+
+                                <!-- 根据类型显示不同选项 -->
+                                <div style="display:flex;gap:8px;align-items:center; flex:1">
+                                    <select v-if="cond.type === 'input'" v-model="cond.input"><option>I0</option><option>I1</option><option>I2</option></select>
+                                    <select v-if="cond.type === 'output'" v-model="cond.output"><option>Q0</option><option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option><option>Q5</option></select>
+                                    <select v-if="cond.type === 'memory'" v-model="cond.memory" style="width:100%">
+                                        <optgroup label="用户区 (可读写)">
+                                            <option v-for="m in userMemoryBits" :key="m" :value="m">{{ m }}</option>
+                                        </optgroup>
+                                        <optgroup label="系统区 (YOLO, 只读)">
+                                            <option v-for="m in yoloMemoryBits" :key="m" :value="m">{{ m }}</option>
+                                        </optgroup>
+                                    </select>
+                                    <select v-if="cond.type === 'timer'" v-model="cond.timer">
+                                        <option v-for="t in config.timers" :value="t.name">{{ t.name }}{{ t.alias ? ` (${t.alias})` : '' }}</option>
+                                    </select>
+                                    <select v-if="cond.type === 'counter'" v-model="cond.counter">
+                                        <option v-for="c in config.counters" :value="c.name">{{ c.name }}{{ c.alias ? ` (${c.alias})` : '' }}</option>
+                                    </select>
+                                </div>
+
+                                <!-- 常开/常闭：修复显示逻辑 -->
+                                <div v-if="['input', 'output', 'memory'].includes(cond.type)">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" v-model="cond.normally_open" />
+                                        <span>{{ cond.normally_open ? '常开触点' : '常闭触点' }}</span>
+                                    </label>
+                                </div>
+                                <div v-else class="help-text" style="text-align:center">
+                                    {{ cond.type === 'timer' ? '时间到(DN)' : '计数满(DN)' }}
+                                </div>
+
+                                <!-- 删除按钮 -->
+                                <button class="icon-btn" style="background:#f56565;color:white" @click="deleteCondition(rung, condIdx)">❌</button>
+                            </div>
+
+                            <button class="add-condition-btn" @click="addCondition(rung)">➕ 添加条件</button>
+                        </div>
+                    </div>
+
+                    <!-- 动作区域：保留中间继电器控制，增加动作说明 -->
+                    <div>
+                        <div class="section-title">⚡ 执行动作（条件满足时执行）</div>
+                        <div class="action-row">
+                            <!-- 动作类型：增加中间继电器置位/复位 -->
+                            <select v-model="rung.action.type" @change="onActionTypeChange(rung)">
+                                <optgroup label="输出控制">
+                                    <option value="output">📤 输出（跟随条件）</option>
+                                    <option value="set">🔒 置位输出 (SET)</option>
+                                    <option value="reset">🔓 复位输出 (RESET)</option>
+                                </optgroup>
+                                <optgroup label="中间继电器">
+                                    <option value="memory_set">💾 置位M位 (SET)</option>
+                                    <option value="memory_reset">🔄 复位M位 (RESET)</option>
+                                </optgroup>
+                                <optgroup label="定时器">
+                                    <option value="timer">⏱️ 启动定时器 (TON)</option>
+                                    <option value="reset_timer">🔄 复位定时器 (RESET)</option>
+                                </optgroup>
+                                <optgroup label="计数器">
+                                    <option value="counter">🔢 计数器计数 (CTU)</option>
+                                    <option value="reset_counter">🔄 复位计数器 (RESET)</option>
+                                </optgroup>
+                            </select>
+
+                            <!-- 根据动作类型显示选项 + 动作说明 -->
+                            <div style="display:flex;gap:12px;align-items:center;flex:1">
+                                <select v-if="['output','set','reset'].includes(rung.action.type)" v-model="rung.action.output" style="flex:1">
+                                    <option value="Q0">Q0</option>
+                                    <option value="Q1">Q1</option>
+                                    <option value="Q2">Q2</option>
+                                    <option value="Q3">Q3</option>
+                                    <option value="Q4">Q4</option>
+                                    <option value="Q5">Q5</option>
+                                </select>
+                                <select v-if="['memory_set','memory_reset'].includes(rung.action.type)" v-model="rung.action.memory" style="flex:1">
+                                    <option v-for="m in userMemoryBits" :key="m" :value="m">{{ m }}</option>
+                                </select>
+                                <select v-if="['timer','reset_timer'].includes(rung.action.type)" v-model="rung.action.timer" style="flex:1">
+                                    <option v-for="t in config.timers" :value="t.name">{{ t.name }}{{ t.alias ? ` (${t.alias})` : '' }}</option>
+                                </select>
+                                <select v-if="['counter','reset_counter'].includes(rung.action.type)" v-model="rung.action.counter" style="flex:1">
+                                    <option v-for="c in config.counters" :value="c.name">{{ c.name }}{{ c.alias ? ` (${c.alias})` : '' }}</option>
+                                </select>
+                                <!-- 动作说明文本 -->
+                                <span class="help-text" style="flex:1">
+                                    <span v-if="rung.action.type === 'output'">条件真时ON，假时OFF</span>
+                                    <span v-if="rung.action.type === 'set'">条件真时置位，需复位指令清除</span>
+                                    <span v-if="rung.action.type === 'reset'">条件真时清除输出</span>
+                                    <span v-if="rung.action.type === 'memory_set'">条件真时置位M位</span>
+                                    <span v-if="rung.action.type === 'memory_reset'">条件真时复位M位</span>
+                                    <span v-if="rung.action.type === 'timer'">条件真时开始计时</span>
+                                    <span v-if="rung.action.type === 'reset_timer'">条件真时清零定时器</span>
+                                    <span v-if="rung.action.type === 'counter'">条件上升沿计数</span>
+                                    <span v-if="rung.action.type === 'reset_counter'">条件真时清零计数器</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模态框：完整保留所有功能模态框 -->
+        <!-- 添加定时器模态框 -->
+        <div v-if="showAddTimer" class="modal" @click.self="showAddTimer = false">
+            <div class="modal-content">
+                <h2 style="margin-bottom:20px">⏱️ 添加定时器</h2>
+                <div class="resource-input-group">
+                    <label>定时器名称</label>
+                    <input v-model="newTimer.name" placeholder="例如：T0" />
+                </div>
+                <div class="resource-input-group">
+                    <label>别名（可选）</label>
+                    <input v-model="newTimer.alias" placeholder="例如：加热延时" />
+                </div>
+                <div class="resource-input-group">
+                    <label>预设时间（秒）</label>
+                    <input type="number" v-model.number="newTimer.preset" step="0.1" min="0.2" placeholder="1.0" @change="validateTimerPreset('new')" />
+                </div>
+                <div style="display:flex;gap:12px;margin-top:20px">
+                    <button class="btn btn-success" style="flex:1" @click="confirmAddTimer">确定</button>
+                    <button class="btn btn-secondary" style="flex:1" @click="showAddTimer = false">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加计数器模态框 -->
+        <div v-if="showAddCounter" class="modal" @click.self="showAddCounter = false">
+            <div class="modal-content">
+                <h2 style="margin-bottom:20px">🔢 添加计数器</h2>
+                <div class="resource-input-group">
+                    <label>计数器名称</label>
+                    <input v-model="newCounter.name" placeholder="例如：C0" />
+                </div>
+                <div class="resource-input-group">
+                    <label>别名（可选）</label>
+                    <input v-model="newCounter.alias" placeholder="例如：产品计数" />
+                </div>
+                <div class="resource-input-group">
+                    <label>预设计数</label>
+                    <input type="number" v-model.number="newCounter.preset" min="1" placeholder="10" @change="validateCounterPreset('new')" />
+                </div>
+                <div style="display:flex;gap:12px;margin-top:20px">
+                    <button class="btn btn-success" style="flex:1" @click="confirmAddCounter">确定</button>
+                    <button class="btn btn-secondary" style="flex:1" @click="showAddCounter = false">取消</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 预览梯形图模态框 -->
+        <div v-if="showPreviewModal" class="modal" @click.self="showPreviewModal = false">
+            <div class="modal-content" style="max-width: 90vw; width: 1200px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="font-size: 20px;">梯形图预览</h2>
+                    <button class="btn btn-secondary" @click="showPreviewModal = false">关闭</button>
+                </div>
+                <div style="background: #fdfdfd; border: 1px solid #eee; padding: 20px; overflow: auto;">
+                    <canvas ref="ladderCanvas" width="1000" height="600"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    config: { rungs: [], timers: [], counters: [] },
+                    showAddTimer: false,
+                    showAddCounter: false,
+                    newTimer: { name: '', alias: '', preset: 1.0 },
+                    newCounter: { name: '', alias: '', preset: 10 },
+                    apiBase: window.location.origin,
+                    isHelpVisible: false, // 帮助说明折叠控制
+                    showPreviewModal: false // 梯形图预览控制
+                };
+            },
+            mounted() {
+                this.loadConfigFromServer();
+            },
+            computed: {
+                userMemoryBits() {
+                    // M0-M39: 用户区（可读写），共40个
+                    return Array.from({ length: 40 }, (_, i) => `M${i}`);
+                },
+                yoloMemoryBits() {
+                    // M40-M45: YOLO区（系统写入，只读），共6个
+                    return Array.from({ length: 6 }, (_, i) => `M${40 + i}`);
+                },
+                outputMemoryBits() {
+                    // 注意：根据 MAX_MEMORY=47，实际只有 M0-M46
+                    // 但 Modbus 资源展示显示 M40-M45 是 YOLO，M46 可能是输出映射的开始
+                    // 这里暂时留空，因为 M46 是最后一个，可能没有完整的输出映射
+                    return [];
+                }
+            },
+            methods: {
+                // 1. 基础配置加载/保存
+                async loadConfigFromServer() {
+                    try {
+                        // 临时：返回假的配置数据，避免后端 API 不存在时报错
+                        // const response = await axios.get(`${this.apiBase}/api/config`);
+                        // this.config = response.data;
+                        
+                        // 使用默认空配置
+                        this.config = { rungs: [], timers: [], counters: [] };
+                        console.log('使用默认配置（后端 API 未实现）', this.config);
+                    } catch (error) {
+                        console.error('加载配置失败', error);
+                        // 失败时使用默认配置
+                        this.config = { rungs: [], timers: [], counters: [] };
+                    }
+                },
+                async saveConfig() {
+                    try {
+                        // 临时：后端 API 未实现，直接提示
+                        // await axios.post(`${this.apiBase}/api/config`, this.config);
+                        
+                        // 验证配置有效性
+                        let validationError = null;
+                        for (const rung of this.config.rungs || []) {
+                            for (const cond of rung.conditions || []) {
+                                if (cond.type === 'memory' && !this.validateMemoryBit(cond.memory)) {
+                                    validationError = `梯级中的条件包含无效的M位: ${cond.memory}`;
+                                    break;
+                                }
+                            }
+                            if (validationError) break;
+
+                            const action = rung.action || {};
+                            if (['memory_set', 'memory_reset'].includes(action.type)) {
+                                if (!this.validateMemoryBit(action.memory, true)) {
+                                    validationError = `梯级中的动作包含无效或只读的M位: ${action.memory}`;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (validationError) {
+                            alert(`❌ 配置验证失败: ${validationError}`);
+                            return;
+                        }
+
+                        // 生成 JSON 并提示下载
+                        const blob = new Blob([JSON.stringify(this.config, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `plc_config_${new Date().toISOString().slice(0,10)}.json`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        
+                        alert('✅ 配置已验证！文件已下载。请手动上传到 PLC 配置目录。\n（后端 API 暂未实现）');
+                    } catch (error) {
+                        alert('❌ 保存失败: ' + error.message);
+                    }
+                },
+                downloadConfig() {
+                    const blob = new Blob([JSON.stringify(this.config, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `user_config_${new Date().toISOString().slice(0,10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                },
+                loadConfig(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const loadedConfig = JSON.parse(e.target.result);
+							 if (!loadedConfig || typeof loadedConfig !== 'object' || !Array.isArray(loadedConfig.rungs)) {
+								throw new Error("配置文件缺少核心的'rungs'数组，文件已损坏。");
+							}
+                            let validationError = null;
+
+                            // --- 开始验证 ---
+                            for (const rung of loadedConfig.rungs || []) {
+                                for (const cond of rung.conditions || []) {
+                                    if (cond.type === 'memory' && !this.validateMemoryBit(cond.memory)) {
+                                        validationError = `梯级中的条件包含无效的M位: ${cond.memory}`;
+                                        break;
+                                    }
+                                }
+                                if (validationError) break;
+
+                                const action = rung.action || {};
+                                if (['memory_set', 'memory_reset'].includes(action.type)) {
+                                    if (!this.validateMemoryBit(action.memory, true)) { // 检查是否可写
+                                        validationError = `梯级中的动作包含无效或只读的M位: ${action.memory}`;
+                                        break;
+                                    }
+                                }
+                            }
+                            // --- 验证结束 ---
+
+                            if (validationError) {
+                                alert(`❌ 配置文件加载失败: ${validationError}`);
+                                return;
+                            }
+
+                            this.config = loadedConfig;
+                            alert('✅ 配置文件已加载并通过验证！记得点击"保存配置"上传到服务器。');
+
+                        } catch (error) {
+                            alert('❌ 配置文件格式错误: ' + error.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                    event.target.value = '';
+                },
+
+                // 2. 梯级操作
+                addRung() {
+                    this.config.rungs.push({
+                        id: Date.now(),
+                        enabled: true,
+                        conditions: [],
+                        action: { type: 'output', output: 'Q0' }
+                    });
+                },
+                deleteRung(idx) {
+                    if (confirm('确定要删除这个梯级吗？')) {
+                        this.config.rungs.splice(idx, 1);
+                    }
+                },
+                moveRungUp(idx) {
+                    if (idx > 0) {
+                        [this.config.rungs[idx], this.config.rungs[idx - 1]] = [this.config.rungs[idx - 1], this.config.rungs[idx]];
+                    }
+                },
+                moveRungDown(idx) {
+                    if (idx < this.config.rungs.length - 1) {
+                        [this.config.rungs[idx], this.config.rungs[idx + 1]] = [this.config.rungs[idx + 1], this.config.rungs[idx]];
+                    }
+                },
+
+                // 3. 条件操作（修复逻辑）
+                addCondition(rung) {
+                    rung.conditions.push({
+                        type: 'input',
+                        input: 'I0',
+                        normally_open: true
+                    });
+                },
+                deleteCondition(rung, condIdx) {
+                    rung.conditions.splice(condIdx, 1);
+                },
+                onConditionTypeChange(rung, cond) {
+                    // 修复：直接使用 rung 和 cond 对象，而不是索引
+                    const type = cond.type;
+                    
+                    const newCond = { type };
+                    
+                    if (type === 'input') { 
+                        newCond.input = 'I0'; 
+                        newCond.normally_open = true; 
+                    } else if (type === 'output') { 
+                        newCond.output = 'Q0'; 
+                        newCond.normally_open = true; 
+                    } else if (type === 'memory') { 
+                        newCond.memory = 'M0'; 
+                        newCond.normally_open = true; 
+                    } else if (type === 'timer') { 
+                        newCond.timer = this.config.timers[0]?.name || ''; 
+                    } else if (type === 'counter') { 
+                        newCond.counter = this.config.counters[0]?.name || ''; 
+                    }
+                    
+                    // 直接更新 cond 对象的属性
+                    Object.assign(cond, newCond);
+                },
+
+                // 4. 动作操作（修复逻辑）
+                onActionTypeChange(rung) {
+                    // 修复：直接使用 rung 对象
+                    const action = rung.action;
+                    const type = action.type;
+                    const newAction = { type };
+
+                    if (['output', 'set', 'reset'].includes(type)) { 
+                        newAction.output = 'Q0'; 
+                    } else if (['memory_set', 'memory_reset'].includes(type)) { 
+                        newAction.memory = 'M0'; 
+                    } else if (['timer', 'reset_timer'].includes(type)) { 
+                        newAction.timer = this.config.timers[0]?.name || ''; 
+                    } else if (['counter', 'reset_counter'].includes(type)) { 
+                        newAction.counter = this.config.counters[0]?.name || ''; 
+                    }
+                    
+                    // 直接更新 action 对象的属性
+                    Object.assign(action, newAction);
+                },
+            getActionHelpText(type) {
+                const texts = {
+                    'output': '条件真时ON，假时OFF', 'set': '条件真时置位，需复位指令清除', 'reset': '条件真时清除输出',
+                    'memory_set': '条件真时置位M位', 'memory_reset': '条件真时复位M位', 'timer': '条件真时开始计时',
+                    'reset_timer': '条件真时清零定时器', 'counter': '条件上升沿计数', 'reset_counter': '条件真时清零计数器'
+                };
+                return texts[type] || '';
+            },
+
+                // 5. 资源管理（整合删除逻辑，增加校验）
+                addResource(type, newItem) {
+                    if (!newItem.name) {
+                        alert(`请输入${type === 'timers' ? '定时器' : '计数器'}名称`);
+                        return false;
+                    }
+                    if (this.config[type].some(item => item.name === newItem.name)) {
+                        alert(`名称 ${newItem.name} 已存在`);
+                        return false;
+                    }
+                    this.config[type].push({ ...newItem });
+                    return true;
+                },
+                confirmAddTimer() {
+                    this.validateTimerPreset('new'); // 新增前校验
+                    if (this.addResource('timers', this.newTimer)) {
+                        this.newTimer = { name: `T${this.config.timers.length}`, alias: '', preset: 1.0 };
+                        this.showAddTimer = false;
+                    }
+                },
+                confirmAddCounter() {
+                    this.validateCounterPreset('new'); // 新增前校验
+                    if (this.addResource('counters', this.newCounter)) {
+                        this.newCounter = { name: `C${this.config.counters.length}`, alias: '', preset: 10 };
+                        this.showAddCounter = false;
+                    }
+                },
+                removeResource(type, idx) {
+                    const resource = this.config[type][idx];
+                    if (confirm(`确定要删除 ${resource.name} 吗？`)) {
+                        this.config[type].splice(idx, 1);
+                    }
+                },
+
+                // 6. 资源参数校验
+                validateTimerPreset(itemOrIndex) {
+                    const scanCycle = 0.2; // 扫描周期最小值
+                    const precision = 100; // 用于修正到两位小数 (10^2)
+                    let timer = itemOrIndex === 'new' ? this.newTimer : this.config.timers[itemOrIndex];
+                    
+                    // 1. 确保 preset 是一个有效的数字，如果不是则设为默认值1.0
+                    let value = parseFloat(timer.preset);
+                    if (isNaN(value)) {
+                        value = 1.0;
+                    }
+
+                    // [新增] 2. 将输入值强制四舍五入到两位小数
+                    //    例如: 2.222222 * 100 = 222.2222 -> Math.round(222.2222) = 222 -> 222 / 100 = 2.22
+                    const roundedValue = Math.round(value * precision) / precision;
+
+                    // 3. 检查最小值
+                    if (roundedValue < scanCycle) {
+                        alert(`定时器预设值不能小于一个扫描周期 (${scanCycle}秒)。已自动修正为最小值。`);
+                        timer.preset = scanCycle;
+                    } else {
+                        // 4. 将最终修正的值（已处理精度和最小值）赋回
+                        timer.preset = roundedValue;
+                    }
+                },
+                validateCounterPreset(itemOrIndex) {
+                    let counter = itemOrIndex === 'new' ? this.newCounter : this.config.counters[itemOrIndex];
+                    counter.preset = Math.max(1, Math.floor(counter.preset || 1)); // 确保正整数
+                },
+
+                // 7. 梯形图预览绘制（保留旧代码优化逻辑）
+                renderLadderDiagram() {
+                    const canvas = this.$refs.ladderCanvas;
+                    if (!canvas) {
+                        console.error('Canvas 元素未找到');
+                        return;
+                    }
+                    const config = this.config;
+                    if (!config || !config.rungs) {
+                        console.error('配置数据无效');
+                        return;
+                    }
+                    // 动态计算画布高度
+                    const RUNG_HEIGHT = 80;
+                    const PADDING = 60;
+                    const requiredHeight = (config.rungs.length || 1) * RUNG_HEIGHT + PADDING;
+                    canvas.height = requiredHeight;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        console.error('无法获取 Canvas 上下文');
+                        return;
+                    }
+
+                    // 绘图常量
+                    const START_X = 50;
+                    const SYMBOL_WIDTH = 60;
+                    const SYMBOL_SPACING = 40;
+                    const RAIL_WIDTH = canvas.width - 100;
+                    const RAIL_Y_START = 30;
+
+                    // 清空画布
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // 绘制电源轨
+                    ctx.fillStyle = '#333';
+                    ctx.fillRect(START_X, RAIL_Y_START, 4, requiredHeight - PADDING); // 左侧
+                    ctx.fillRect(START_X + RAIL_WIDTH, RAIL_Y_START, 4, requiredHeight - PADDING); // 右侧
+
+                    // 绘制每个梯级
+                    config.rungs.forEach((rung, index) => {
+                        const y = RAIL_Y_START + (index * RUNG_HEIGHT) + (RUNG_HEIGHT / 2);
+                        // 绘制水平线
+                        ctx.strokeStyle = '#333';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(START_X, y);
+                        ctx.lineTo(START_X + RAIL_WIDTH, y);
+                        ctx.stroke();
+
+                        let currentX = START_X + SYMBOL_SPACING;
+                        // 绘制条件
+                        rung.conditions.forEach(cond => {
+                            this.drawCondition(ctx, currentX, y, cond);
+                            currentX += SYMBOL_WIDTH + SYMBOL_SPACING;
+                        });
+                        // 绘制动作
+                        this.drawAction(ctx, START_X + RAIL_WIDTH - SYMBOL_WIDTH - SYMBOL_SPACING, y, rung.action);
+                    });
+                },
+                drawCondition(ctx, x, y, cond) {
+                    let label = '';
+                    
+                    if (cond.type === 'input' && cond.input) {
+                        label = cond.input;
+                        this.drawContact(ctx, x, y, cond.normally_open);
+                    } else if (cond.type === 'output' && cond.output) {
+                        label = cond.output;
+                        this.drawContact(ctx, x, y, cond.normally_open);
+                    } else if (cond.type === 'memory' && cond.memory) { // <--- 新增对M位的处理
+                        label = cond.memory;
+                        this.drawContact(ctx, x, y, cond.normally_open);
+                    } else if (cond.type === 'timer' && cond.timer) {
+                        label = `${cond.timer}.DN`;
+                        this.drawContact(ctx, x, y, true);
+                    } else if (cond.type === 'counter' && cond.counter) {
+                        label = `${cond.counter}.DN`;
+                        this.drawContact(ctx, x, y, true);
+                    }
+
+                    if (label) {
+                        ctx.fillStyle = '#005a9e';
+                        ctx.font = 'bold 13px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(label, x + 30, y - 20);
+                    }
+                },
+                drawAction(ctx, x, y, action) {
+                    let label = '';
+                    let coilText = '';
+
+                    if (['output', 'set', 'reset'].includes(action.type) && action.output) {
+                        label = action.output;
+                        if (action.type === 'set') coilText = 'S';
+                        if (action.type === 'reset') coilText = 'R';
+                    } else if (['memory_set', 'memory_reset'].includes(action.type) && action.memory) { // <--- 新增对M位的处理
+                        label = action.memory;
+                        if (action.type === 'memory_set') coilText = 'S';
+                        if (action.type === 'memory_reset') coilText = 'R';
+                    } else if (['timer', 'reset_timer'].includes(action.type) && action.timer) {
+                        label = action.timer;
+                        coilText = action.type === 'reset_timer' ? 'RST' : 'TON';
+                    } else if (['counter', 'reset_counter'].includes(action.type) && action.counter) {
+                        label = action.counter;
+                        coilText = action.type === 'reset_counter' ? 'RST' : 'CTU';
+                    }
+
+                    this.drawCoil(ctx, x, y, coilText); // 绘制线圈
+
+                    if (label) {
+                        ctx.fillStyle = '#005a9e';
+                        ctx.font = 'bold 13px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(label, x + 30, y - 20);
+                    }
+                },
+                drawContact(ctx, x, y, isNormallyOpen) {
+                    const h = 20;
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    // 触点基础图形
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x + 15, y);
+                    ctx.moveTo(x + 15, y - h / 2);
+                    ctx.lineTo(x + 15, y + h / 2);
+                    ctx.moveTo(x + 45, y - h / 2);
+                    ctx.lineTo(x + 45, y + h / 2);
+                    ctx.moveTo(x + 45, y);
+                    ctx.lineTo(x + 60, y);
+                    ctx.stroke();
+                    // 常闭触点添加斜线
+                    if (!isNormallyOpen) {
+                        ctx.beginPath();
+                        ctx.moveTo(x + 17, y + h / 2 - 2);
+                        ctx.lineTo(x + 43, y - h / 2 + 2);
+                        ctx.stroke();
+                    }
+                },
+                drawCoil(ctx, x, y, text = '') {
+                    const r = 12;
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    // 线圈图形
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    ctx.lineTo(x + 5, y);
+                    ctx.arc(x + 5 + r, y, r, Math.PI, 0);
+                    ctx.moveTo(x + 5 + 2 * r, y);
+                    ctx.lineTo(x + 60, y);
+                    ctx.stroke();
+                    // 线圈文本
+                    if (text) {
+                        ctx.font = 'bold 12px Arial';
+                        ctx.fillStyle = '#333';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(text, x + 30, y);
+                    }
+                },    
+                validateMemoryBit(bit, isWritable = false) {
+                    if (typeof bit !== 'string' || !bit.startsWith('M')) return false;
+                    const num = parseInt(bit.substring(1));
+                    if (isNaN(num)) return false;
+
+                    // 检查总范围：M0-M46（共47个）
+                    if (num < 0 || num > 46) return false;
+
+                    // 如果要求是可写的，则只能写入用户区 M0-M39
+                    if (isWritable && num > 39) return false;
+
+                    return true;
+                },
+            },
+            watch: {
+                // 监听模态框显示，自动填充资源名称
+                showAddTimer(val) {
+                    if (val) this.newTimer.name = `T${this.config.timers.length}`;
+                },
+                showAddCounter(val) {
+                    if (val) this.newCounter.name = `C${this.config.counters.length}`;
+                },
+                // 监听预览模态框，渲染梯形图
+                showPreviewModal(isShowing) {
+                    if (isShowing) this.$nextTick(() => this.renderLadderDiagram());
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

@@ -5,6 +5,37 @@
 #include <iostream>
 #include <algorithm>
 #include <unordered_set>
+#include <cctype>
+
+// 【修复】安全的字符串转整数，带范围检查
+namespace {
+    bool safe_parse_index(const std::string& name, size_t prefix_len, 
+                         int& index, int max_value) {
+        if (name.length() <= prefix_len) {
+            return false;
+        }
+        
+        std::string num_str = name.substr(prefix_len);
+        if (num_str.empty()) {
+            return false;
+        }
+        
+        // 检查是否全为数字
+        for (char c : num_str) {
+            if (!std::isdigit(static_cast<unsigned char>(c))) {
+                return false;
+            }
+        }
+        
+        try {
+            index = std::stoi(num_str);
+            return (index >= 0 && index < max_value);
+        } catch (const std::exception& e) {
+            std::cerr << "[LADDER] 解析索引失败: " << name << " - " << e.what() << std::endl;
+            return false;
+        }
+    }
+}
 
 LadderEngine::LadderEngine(TimerManager& tm, CounterManager& cm) 
     : timer_manager_(tm), counter_manager_(cm), config_loaded_(false) {
@@ -216,34 +247,31 @@ bool LadderEngine::evaluate_condition(const Condition& cond,
     
     switch (cond.type) {
         case ConditionType::INPUT: {
-            // 解析输入名称（如"I0" -> 索引0）
-            if (cond.name.length() > 1 && cond.name[0] == 'I') {
-                int index = std::stoi(cond.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_INPUTS) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (cond.name.length() > 1 && cond.name[0] == 'I' && 
+                safe_parse_index(cond.name, 1, index, PLCConstants::MAX_INPUTS)) {
                     state = inputs[index];
-                }
             }
             break;
         }
         
         case ConditionType::OUTPUT: {
-            // 解析输出名称（如"Q0" -> 索引0）
-            if (cond.name.length() > 1 && cond.name[0] == 'Q') {
-                int index = std::stoi(cond.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_OUTPUTS) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (cond.name.length() > 1 && cond.name[0] == 'Q' && 
+                safe_parse_index(cond.name, 1, index, PLCConstants::MAX_OUTPUTS)) {
                     state = shm->outputs[index].load();
-                }
             }
             break;
         }
         
         case ConditionType::MEMORY: {
-            // 解析中间继电器名称（如"M5" -> 索引5）
-            if (cond.name.length() > 1 && cond.name[0] == 'M') {
-                int index = std::stoi(cond.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_MEMORY) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (cond.name.length() > 1 && cond.name[0] == 'M' && 
+                safe_parse_index(cond.name, 1, index, PLCConstants::MAX_MEMORY)) {
                     state = shm->memory[index].load();
-                }
             }
             break;
         }
@@ -265,11 +293,15 @@ bool LadderEngine::evaluate_condition(const Condition& cond,
         }
         
         case ConditionType::YOLO_FLAG: {
-            // 解析YOLO标志（如"Y1" -> 索引0）
+            // 【修复】使用安全解析函数
+            int index = -1;
             if (cond.name.length() > 1 && cond.name[0] == 'Y') {
-                int index = std::stoi(cond.name.substr(1)) - 1;
+                int raw_index = -1;
+                if (safe_parse_index(cond.name, 1, raw_index, PLCConstants::MAX_YOLO_FLAGS + 1)) {
+                    index = raw_index - 1;  // Y1对应索引0
                 if (index >= 0 && index < PLCConstants::MAX_YOLO_FLAGS) {
                     state = shm->yolo_flags[index].load();
+                    }
                 }
             }
             break;
@@ -288,11 +320,11 @@ void LadderEngine::execute_action(const Action& act,
     // 如果梯级条件为假，标准线圈应该断电
     if (!result) {
         if (act.type == ActionType::OUTPUT) {
-            if (act.name.length() > 1 && act.name[0] == 'Q') {
-                int index = std::stoi(act.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_OUTPUTS) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (act.name.length() > 1 && act.name[0] == 'Q' && 
+                safe_parse_index(act.name, 1, index, PLCConstants::MAX_OUTPUTS)) {
                     shm->outputs[index].store(false);
-                }
             }
         }
         // 对于 SET/RESET 等锁存指令，条件为假时不执行任何操作，所以直接返回
@@ -302,56 +334,51 @@ void LadderEngine::execute_action(const Action& act,
     // 下面是 result 为 true 时的逻辑
     switch (act.type) {
         case ActionType::OUTPUT: {
-            // 解析输出名称并设置
-            if (act.name.length() > 1 && act.name[0] == 'Q') {
-                int index = std::stoi(act.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_OUTPUTS) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (act.name.length() > 1 && act.name[0] == 'Q' && 
+                safe_parse_index(act.name, 1, index, PLCConstants::MAX_OUTPUTS)) {
                     shm->outputs[index].store(true);
-                }
             }
             break;
         }
         
         case ActionType::SET: {
-            // 置位输出
-            if (act.name.length() > 1 && act.name[0] == 'Q') {
-                int index = std::stoi(act.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_OUTPUTS) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (act.name.length() > 1 && act.name[0] == 'Q' && 
+                safe_parse_index(act.name, 1, index, PLCConstants::MAX_OUTPUTS)) {
                     shm->outputs[index].store(true);
-                }
             }
             break;
         }
         
         case ActionType::RESET: {
-            // 复位输出
-            if (act.name.length() > 1 && act.name[0] == 'Q') {
-                int index = std::stoi(act.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_OUTPUTS) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (act.name.length() > 1 && act.name[0] == 'Q' && 
+                safe_parse_index(act.name, 1, index, PLCConstants::MAX_OUTPUTS)) {
                     shm->outputs[index].store(false);
-                }
             }
             break;
         }
         
         case ActionType::MEMORY_SET: {
-            // 置位中间继电器
-            if (act.name.length() > 1 && act.name[0] == 'M') {
-                int index = std::stoi(act.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_MEMORY) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (act.name.length() > 1 && act.name[0] == 'M' && 
+                safe_parse_index(act.name, 1, index, PLCConstants::MAX_MEMORY)) {
                     shm->memory[index].store(true);
-                }
             }
             break;
         }
         
         case ActionType::MEMORY_RESET: {
-            // 复位中间继电器
-            if (act.name.length() > 1 && act.name[0] == 'M') {
-                int index = std::stoi(act.name.substr(1));
-                if (index >= 0 && index < PLCConstants::MAX_MEMORY) {
+            // 【修复】使用安全解析函数
+            int index = -1;
+            if (act.name.length() > 1 && act.name[0] == 'M' && 
+                safe_parse_index(act.name, 1, index, PLCConstants::MAX_MEMORY)) {
                     shm->memory[index].store(false);
-                }
             }
             break;
         }

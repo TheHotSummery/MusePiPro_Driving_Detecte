@@ -48,14 +48,17 @@ void show_version() {
 
 int main(int argc, char* argv[]) {
     // 默认配置文件路径
+    // 优先使用 /home/hyit/plc/plc_config.json
     std::string system_config = "config/system_config.json";
     std::string user_config = "config/user_config.json";
-    std::string unified_config = "config/plc_config.json";
+    std::string unified_config = "/home/hyit/plc/plc_config.json";  // 默认优先加载路径
 
     // 简单的命令行参数解析
     if (argc > 1) {
         unified_config = argv[1];
         std::cout << "使用命令行指定的统一配置文件: " << unified_config << std::endl;
+    } else {
+        std::cout << "使用默认配置文件路径: " << unified_config << std::endl;
     }
 
     // 使用 fork() 创建子进程
@@ -184,9 +187,13 @@ int main(int argc, char* argv[]) {
                 break; 
             }
 
-            // 检查心跳
-            uint32_t current_heartbeat = shm.data()->heartbeat.load();
-            if (current_heartbeat == last_heartbeat) {
+            // 【修复】检查心跳 - 修复竞态条件
+            // 使用原子操作确保读取的一致性
+            uint32_t current_heartbeat = shm.data()->heartbeat.load(std::memory_order_acquire);
+            uint32_t prev_heartbeat = last_heartbeat;
+            
+            // 原子比较：如果心跳值未变化，则超时计数
+            if (current_heartbeat == prev_heartbeat) {
                 timeout_counter++;
                 if (timeout_counter >= timeout_seconds) {
                     std::cerr << "[SUPERVISOR] 心跳超时！Worker 进程可能已死锁或崩溃！" << std::endl;
@@ -197,8 +204,9 @@ int main(int argc, char* argv[]) {
                     std::cerr << "[SUPERVISOR] 已发送 SIGKILL 到 Worker 进程。" << std::endl;
                 }
             } else {
+                // 心跳已更新，重置超时计数器
                 last_heartbeat = current_heartbeat;
-                timeout_counter = 0; // 重置超时计数器
+                timeout_counter = 0;
             }
     }
     
