@@ -1,0 +1,260 @@
+/* TailwindCSS */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 全局字体与背景 */
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;700&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #020617;
+  color: #e2e8f0;
+  font-family: 'Noto Sans SC', sans-serif;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+.font-tech {
+  font-family: 'Rajdhani', sans-serif; /* 科技感数字字体 */
+}
+
+/* 科技感背景网格动画 */
+.bg-grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(0, 242, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 242, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  z-index: -1;
+  animation: gridMove 20s linear infinite;
+}
+
+@keyframes gridMove {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(40px); }
+}
+
+/* 玻璃拟态卡片 */
+.glass-panel {
+  background: rgba(13, 25, 48, 0.6);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 242, 255, 0.1);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  position: relative;
+  clip-path: polygon(
+    0 0, 
+    100% 0, 
+    100% calc(100% - 20px), 
+    calc(100% - 20px) 100%, 
+    0 100%
+  ); /* 右下角切角 */
+}
+
+/* 卡片装饰线 */
+.glass-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00f2ff, transparent);
+}
+
+.glass-panel::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  border-bottom: 2px solid #00f2ff;
+  border-right: 2px solid #00f2ff;
+}
+
+/* 标题光效 */
+.header-title {
+  background: linear-gradient(to bottom, #ffffff, #84ccff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #00f2ff;
+  border-radius: 2px;
+}
+
+/* 告警列表动画 */
+.alert-item {
+  animation: slideIn 0.5s ease-out forwards;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 地图容器 */
+.map-container {
+  width: 100%;
+  height: 100%;
+  background: #050b14; /* 地图加载前的底色 */
+}
+
+/* 自定义高德地图 InfoWindow */
+.amap-info-content {
+  background: rgba(13, 25, 48, 0.9) !important;
+  border: 1px solid #00f2ff !important;
+  color: white !important;
+  box-shadow: 0 0 15px #00f2ff44 !important;
+}
+
+.amap-info-sharp {
+  border-top-color: #00f2ff !important;
+}
+
+/* 科技卡片 */
+.tech-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 角标装饰 */
+.tech-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 20px 20px 0;
+  border-color: transparent #00f2ff transparent transparent;
+}
+
+/* 自定义表格 */
+.tech-table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+}
+
+.tech-table th {
+  color: #94a3b8;
+  padding: 12px;
+  border-bottom: 1px solid #334155;
+  font-size: 0.8rem;
+}
+
+.tech-table td {
+  padding: 12px;
+  border-bottom: 1px solid #1e293b;
+  color: #f8fafc;
+}
+
+.tech-table tr:hover {
+  background: rgba(0, 242, 255, 0.05);
+}
+
+.score-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.score-high {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid #059669;
+}
+
+.score-mid {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid #d97706;
+}
+
+.score-low {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid #dc2626;
+}
+
+/* 玻璃控制面板 */
+.glass-control {
+  background: rgba(13, 25, 48, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 242, 255, 0.2);
+  border-radius: 8px;
+}
+
+/* 自定义滑块样式 */
+input[type=range] {
+  -webkit-appearance: none;
+  background: transparent;
+  width: 100%;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  background: #00f2ff;
+  margin-top: -6px;
+  cursor: pointer;
+  box-shadow: 0 0 10px #00f2ff;
+}
+
+input[type=range]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 4px;
+  background: #334155;
+  border-radius: 2px;
+}
+
+/* Router Link 样式重置 */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+.router-link-active {
+  text-decoration: none;
+}
+
+.router-link-exact-active {
+  text-decoration: none;
+}
+
