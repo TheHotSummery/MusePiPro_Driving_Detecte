@@ -136,7 +136,7 @@ Muse Pi Pro 疲劳驾驶监测系统是一个基于深度学习的实时驾驶�
 sudo apt-get update
 sudo apt-get install -y python3-pip python3-dev libgpiod-dev
 
-# 安装 Python 依赖
+# 安装 Python 依赖(这个有点大，可能确实需要很多时间，因为部分调试+冗余依赖我也算在里面了)
 pip3 install -r requirements.txt
 ```
 
@@ -580,14 +580,16 @@ tail -f performance_logs/performance_*.log
 - 检查模型文件是否存在
 - 检查模型文件格式（ONNX 或 PyTorch）
 - 检查 `MODEL_TYPE` 配置是否正确
-- 查看日志中的错误信息
+- 查看日志中的错误信息（如果是模型你未量化或者量化的不好，按理只是卡顿，不会加载失败）
 
 ### 6. 性能问题
 
 **问题**：系统运行缓慢，帧率低
 
 **解决方案**：
-- 降低模型输入分辨率
+
+- 先检查你的模型量化是否正常！！！正常大小控制在3-6mb左右
+- 
 - 降低目标帧率（`fps_target`）
 - 禁用性能监控（如果不需要）
 - 检查系统资源使用情况
@@ -597,7 +599,7 @@ tail -f performance_logs/performance_*.log
 **问题**：数据无法上报到后端服务器
 
 **解决方案**：
-- 检查网络连接
+- 不影响系统正常使用，如果是自己部署的服务器，先自己postman跑一下看看
 - 检查后端服务器地址和端口
 - 检查设备 ID 配置
 - 查看网络管理器日志
@@ -704,6 +706,8 @@ muse-hardware/
 ## 联系方式
 
 如有问题或建议，请联系https://gitee.com/achenjiayi。或者来提出ISSUES？
+
+邮箱：zhangyile577@qq.com 
 
 ---
 
