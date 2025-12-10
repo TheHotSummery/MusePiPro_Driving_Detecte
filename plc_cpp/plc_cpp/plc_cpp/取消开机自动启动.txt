@@ -1,0 +1,29 @@
+# 1. 重新加载systemd配置
+sudo systemctl daemon-reload
+
+# 2. 启用开机自启
+sudo systemctl enable plc-core.service
+
+# 3. 立即启动服务
+sudo systemctl start plc-core.service
+
+# 4. 停止服务
+sudo systemctl stop plc-core.service
+
+# 5. 取消开机自启
+sudo systemctl disable plc-core.service
+
+# 6. 查看服务状态
+sudo systemctl status plc-core.service
+
+# 7. 查看服务日志
+sudo journalctl -u plc-core.service -f
+
+# 8. 重启服务
+sudo systemctl restart plc-core.service
+
+# 9. 查看是否已启用自启
+systemctl is-enabled plc-core.service
+
+# 10. 列出所有已启用的服务
+systemctl list-unit-files --state=enabled | grep plc

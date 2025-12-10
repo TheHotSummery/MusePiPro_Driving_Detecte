@@ -1,93 +1,94 @@
 {
   "rungs": [
     {
-      "id": "system_light_1",
+      "id": "user_light_1",
       "enabled": true,
       "conditions": [
         {
           "type": "timer",
-          "timer": "T1",
+          "timer": "T4",
           "normally_open": true
         }
       ],
       "action": {
         "type": "output",
-        "output": "Q3"
+        "output": "Q0"
       }
     },
     {
-      "id": "system_light_2", 
+      "id": "user_light_2",
       "enabled": true,
       "conditions": [
         {
           "type": "timer",
-          "timer": "T2",
+          "timer": "T5",
           "normally_open": true
         }
       ],
       "action": {
         "type": "output",
-        "output": "Q4"
+        "output": "Q1"
       }
     },
     {
-      "id": "system_light_3",
+      "id": "user_light_3",
       "enabled": true,
       "conditions": [
         {
           "type": "timer",
-          "timer": "T3",
+          "timer": "T6",
           "normally_open": true
         }
       ],
       "action": {
         "type": "output",
-        "output": "Q5"
+        "output": "Q2"
       }
     },
     {
-      "id": "system_timer_1",
+      "id": "user_timer_1",
       "enabled": true,
       "conditions": [],
       "action": {
         "type": "timer",
-        "timer": "T1"
+        "timer": "T4"
       }
     },
     {
-      "id": "system_timer_2",
+      "id": "user_timer_2",
       "enabled": true,
       "conditions": [],
       "action": {
         "type": "timer",
-        "timer": "T2"
+        "timer": "T5"
       }
     },
     {
-      "id": "system_timer_3",
+      "id": "user_timer_3",
       "enabled": true,
       "conditions": [],
       "action": {
         "type": "timer",
-        "timer": "T3"
+        "timer": "T6"
       }
     }
   ],
   "timers": [
     {
-      "name": "T1",
+      "name": "T4",
       "preset": 2.0,
-      "alias": "系统灯1-2秒间隔"
+      "alias": "用户灯1-2秒间隔"
     },
     {
-      "name": "T2",
+      "name": "T5",
       "preset": 1.0,
-      "alias": "系统灯2-1秒间隔"
+      "alias": "用户灯2-1秒间隔"
     },
     {
-      "name": "T3",
+      "name": "T6",
       "preset": 0.1,
-      "alias": "系统灯3-0.1秒间隔"
+      "alias": "用户灯3-0.1秒间隔"
     }
-  ]
+  ],
+  "counters": []
 }

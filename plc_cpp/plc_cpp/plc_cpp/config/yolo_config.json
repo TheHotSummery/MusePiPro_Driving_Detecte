@@ -1,0 +1,114 @@
+{
+    "timers": [
+        {
+            "name": "T1",
+            "preset": 0.5,
+            "alias": "Q0_Blink_1s"
+        },
+        {
+            "name": "T4",
+            "preset": 0.3,
+            "alias": "Q4_LED_Blink"
+        }
+    ],
+    "counters": [],
+    "rungs": [
+        {
+            "id": "YOLO_Level1_Q3_output",
+            "enabled": true,
+            "conditions": [
+                {
+                    "type": "memory",
+                    "memory": "M40",
+                    "normally_open": true
+                }
+            ],
+            "action": {
+                "type": "output",
+                "output": "Q3"
+            }
+        },
+        {
+            "id": "YOLO_Level2_T4_enable",
+            "enabled": true,
+            "conditions": [
+                {
+                    "type": "memory",
+                    "memory": "M41",
+                    "normally_open": true
+                },
+                {
+                    "type": "timer",
+                    "timer": "T4",
+                    "normally_open": false
+                }
+            ],
+            "action": {
+                "type": "timer",
+                "timer": "T4"
+            }
+        },
+        {
+            "id": "YOLO_Level2_Q4_output",
+            "enabled": true,
+            "conditions": [
+                {
+                    "type": "timer",
+                    "timer": "T4",
+                    "normally_open": true
+                }
+            ],
+            "action": {
+                "type": "output",
+                "output": "Q4"
+            }
+        },
+        {
+            "id": "YOLO_Level3_Q5_output",
+            "enabled": true,
+            "conditions": [
+                {
+                    "type": "memory",
+                    "memory": "M42",
+                    "normally_open": true
+                }
+            ],
+            "action": {
+                "type": "output",
+                "output": "Q5"
+            }
+        },
+        {
+            "id": "timer_T1_enable_Q0",
+            "enabled": true,
+            "conditions": [
+                {
+                    "type": "timer",
+                    "timer": "T1",
+                    "normally_open": false
+                }
+            ],
+            "action": {
+                "type": "timer",
+                "timer": "T1"
+            }
+        },
+        {
+            "id": "output_Q0_from_T1",
+            "enabled": true,
+            "conditions": [
+                {
+                    "type": "timer",
+                    "timer": "T1",
+                    "normally_open": true
+                }
+            ],
+            "action": {
+                "type": "output",
+                "output": "Q0"
+            }
+        }
+    ]
+}
+
+
