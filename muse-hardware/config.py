@@ -78,12 +78,12 @@ CONFIG = {
     "progress_decrement_focused": 5.0,
     "progress_decrement_normal": 0.5,
     "event_merge_window": 5.0,
-    "focused_confidence_boost": 0.18,  # 提高专注驾驶的置信度提升（从0.12提高到0.18）
-    "focused_min_confidence": 0.70,    # 专注驾驶的最低置信度阈值（从0.75降低到0.70，更容易识别）
+    "focused_confidence_boost": 0.15,  # 提高专注驾驶的置信度提升（从0.12提高到0.18）
+    "focused_min_confidence": 0.72,    # 专注驾驶的最低置信度阈值（从0.75降低到0.70，更容易识别）
     "distraction_confidence_threshold": 0.85  # 分心行为的置信度阈值
 }
 
-# GPIO配置
+# GPIO配置（v2版本已经废弃，但需要考虑兼容）
 GPIO_CONFIG = {
     "led": 70,       # LED
     "vibrator": 71,  # 振动马达
@@ -118,7 +118,7 @@ PERFORMANCE_MONITOR_CONFIG = {
     "interval": 5.0           # 记录间隔（秒）
 }
 
-# 硬件看门狗配置
+# 硬件看门狗配置（调试用的，如果不需要请禁用）
 # 注意：硬件看门狗用于防止系统重启，建议保持启用
 # 如果遇到权限问题（Permission denied），可以：
 # 1. 禁用此功能（设置 enabled=False）
@@ -132,7 +132,7 @@ HARDWARE_WATCHDOG_CONFIG = {
 # 网络模块（EC800M）配置
 # 注意：可以临时禁用网络模块，避免串口操作导致的问题
 NETWORK_MODULE_CONFIG = {
-    "enabled": True,         # 是否启用网络模块（默认False，临时禁用）
+    "enabled": False,         # 是否启用网络模块（默认False，临时禁用）
     "skip_gnss": False,        # 是否跳过GNSS初始化
     "skip_ntp": False,         # 是否跳过NTP时间同步
     "skip_login": False        # 是否跳过设备登录
