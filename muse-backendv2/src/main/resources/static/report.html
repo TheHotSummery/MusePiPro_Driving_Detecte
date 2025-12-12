@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>运营数据报表 - RISC-V Platform</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+
+    <style>
+        body { background-color: #020617; color: #e2e8f0; font-family: 'Noto Sans SC', sans-serif; }
+        /* 科技卡片 */
+        .tech-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        /* 角标装饰 */
+        .tech-card::after {
+            content: ''; position: absolute; top: 0; right: 0;
+            width: 0; height: 0;
+            border-style: solid; border-width: 0 20px 20px 0;
+            border-color: transparent #00f2ff transparent transparent;
+        }
+        
+        /* 自定义表格 */
+        .tech-table { width: 100%; text-align: left; border-collapse: collapse; }
+        .tech-table th { color: #94a3b8; padding: 12px; border-bottom: 1px solid #334155; font-size: 0.8rem; }
+        .tech-table td { padding: 12px; border-bottom: 1px solid #1e293b; color: #f8fafc; }
+        .tech-table tr:hover { background: rgba(0, 242, 255, 0.05); }
+        
+        .score-badge {
+            padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold;
+        }
+        .score-high { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #059669; }
+        .score-mid { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #d97706; }
+        .score-low { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #dc2626; }
+    </style>
+</head>
+<body>
+    <div id="app" class="min-h-screen p-8">
+        <!-- 头部 -->
+        <div class="flex justify-between items-end mb-8">
+            <div>
+                <a href="index.html" class="text-cyan-400 hover:text-white flex items-center gap-2 mb-2 transition"><i class="ri-arrow-left-line"></i> 返回大屏</a>
+                <h1 class="text-3xl font-bold text-white">运营数据统计报表</h1>
+                <p class="text-gray-400 text-sm mt-1">统计周期: {{ periodText }}</p>
+            </div>
+            <button class="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2 rounded font-bold flex items-center gap-2 transition">
+                <i class="ri-download-line"></i> 导出 PDF 报告
+            </button>
+        </div>
+
+        <!-- 主要内容网格 -->
+        <div class="grid grid-cols-12 gap-6">
+            
+            <!-- 1. 总体概览 (占据一整行) -->
+            <div class="col-span-12 grid grid-cols-4 gap-6 mb-2">
+                <div class="tech-card p-6 flex items-center justify-between">
+                    <div>
+                        <div class="text-gray-400 text-xs uppercase">总行驶里程</div>
+                        <div class="text-2xl font-bold text-white mt-1">{{ formatNumber(summaryData.totalDistance) }} <span class="text-sm font-normal text-gray-500">km</span></div>
+                    </div>
+                    <i class="ri-road-map-line text-3xl text-cyan-500"></i>
+                </div>
+                <div class="tech-card p-6 flex items-center justify-between">
+                    <div>
+                        <div class="text-gray-400 text-xs uppercase">疲劳告警总数</div>
+                        <div class="text-2xl font-bold text-red-400 mt-1">{{ summaryData.totalEvents }} <span class="text-sm font-normal text-gray-500">次</span></div>
+                    </div>
+                    <i class="ri-alarm-warning-line text-3xl text-red-500"></i>
+                </div>
+                <div class="tech-card p-6 flex items-center justify-between">
+                    <div>
+                        <div class="text-gray-400 text-xs uppercase">平均安全评分</div>
+                        <div class="text-2xl font-bold text-green-400 mt-1">{{ summaryData.avgSafetyScore.toFixed(1) }}</div>
+                    </div>
+                    <i class="ri-shield-check-line text-3xl text-green-500"></i>
+                </div>
+                <div class="tech-card p-6 flex items-center justify-between">
+                    <div>
+                        <div class="text-gray-400 text-xs uppercase">车队在线率</div>
+                        <div class="text-2xl font-bold text-blue-400 mt-1">{{ summaryData.onlineRate.toFixed(1) }}%</div>
+                    </div>
+                    <i class="ri-signal-tower-line text-3xl text-blue-500"></i>
+                </div>
+            </div>
+
+            <!-- 2. 月度趋势图 (占8列) -->
+            <div class="col-span-8 tech-card p-6 min-h-[400px]">
+                <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-cyan-400 pl-3">疲劳事件月度趋势分析</h3>
+                <div id="chart-line" class="w-full h-[320px]"></div>
+            </div>
+
+            <!-- 3. 告警类型占比 (占4列) -->
+            <div class="col-span-4 tech-card p-6 min-h-[400px]">
+                <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-cyan-400 pl-3">违规行为类型占比</h3>
+                <div id="chart-pie" class="w-full h-[320px]"></div>
+            </div>
+
+            <!-- 4. 驾驶员排行榜 (占12列) -->
+            <div class="col-span-12 tech-card p-6">
+                <h3 class="text-lg font-bold text-white mb-4 border-l-4 border-cyan-400 pl-3">驾驶员安全绩效排行榜 (Top 10)</h3>
+                <table class="tech-table">
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>姓名</th>
+                            <th>工号</th>
+                            <th>所属车队</th>
+                            <th>行驶时长 (h)</th>
+                            <th>告警次数</th>
+                            <th>安全评分</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="(d, index) in drivers" :key="index">
+                            <td>
+                                <span v-if="index < 3" class="w-6 h-6 rounded-full bg-yellow-500/20 text-yellow-500 flex items-center justify-center text-xs font-bold">{{ index + 1 }}</span>
+                                <span v-else class="text-gray-500 pl-2">{{ index + 1 }}</span>
+                            </td>
+                            <td class="font-bold">{{ d.name }}</td>
+                            <td class="text-gray-400 font-mono">{{ d.id }}</td>
+                            <td>{{ d.team }}</td>
+                            <td>{{ d.hours }}</td>
+                            <td :class="d.alerts > 5 ? 'text-red-400' : 'text-gray-300'">{{ d.alerts }}</td>
+                            <td>
+                                <span class="score-badge" :class="getScoreClass(d.score)">{{ d.score }}</span>
+                            </td>
+                            <td>
+                                <button class="text-cyan-400 hover:text-white text-xs underline">查看详情</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+        const API_BASE = '/api/v2/dashboard';
+
+        createApp({
+            setup() {
+                const drivers = ref([]);
+                const summaryData = ref({
+                    totalDistance: 0,
+                    totalEvents: 0,
+                    avgSafetyScore: 0,
+                    onlineRate: 0
+                });
+                const trendData = ref([]);
+                const behaviorData = ref([]);
+                const periodText = ref('最近30天');
+
+                const getScoreClass = (score) => {
+                    if(score >= 90) return 'score-high';
+                    if(score >= 75) return 'score-mid';
+                    return 'score-low';
+                };
+
+                const fetchData = async () => {
+                    try {
+                        const now = Date.now();
+                        const startTime = now - 30 * 24 * 60 * 60 * 1000; // 最近30天
+
+                        // 获取驾驶员统计
+                        const driversRes = await fetch(`${API_BASE}/statistics/drivers?startTime=${startTime}&endTime=${now}`);
+                        const driversData = await driversRes.json();
+                        if (driversData.code === 200 && driversData.data) {
+                            drivers.value = (driversData.data.drivers || []).slice(0, 10).map(d => ({
+                                name: d.driverName || '未知',
+                                id: d.driverId || '',
+                                team: d.teamName || '未分配',
+                                hours: Math.floor((d.statistics?.totalDuration || 0) / 3600),
+                                alerts: d.statistics?.totalEvents || 0,
+                                score: d.statistics?.safetyScore || 0
+                            }));
+
+                            // 计算汇总数据
+                            const totalDrivers = driversData.data.drivers?.length || 0;
+                            if (totalDrivers > 0) {
+                                summaryData.value.totalDistance = driversData.data.drivers.reduce((sum, d) => 
+                                    sum + (d.statistics?.totalDistance || 0), 0);
+                                summaryData.value.totalEvents = driversData.data.drivers.reduce((sum, d) => 
+                                    sum + (d.statistics?.totalEvents || 0), 0);
+                                summaryData.value.avgSafetyScore = driversData.data.drivers.reduce((sum, d) => 
+                                    sum + (d.statistics?.safetyScore || 0), 0) / totalDrivers;
+                            }
+                        }
+
+                        // 获取事件统计
+                        const eventsRes = await fetch(`${API_BASE}/statistics/events?startTime=${startTime}&endTime=${now}`);
+                        const eventsData = await eventsRes.json();
+                        if (eventsData.code === 200 && eventsData.data) {
+                            summaryData.value.totalEvents = eventsData.data.totalEvents || 0;
+                        }
+
+                        // 获取系统状态（在线率）
+                        const systemRes = await fetch(`${API_BASE}/realtime/system`);
+                        const systemData = await systemRes.json();
+                        if (systemData.code === 200 && systemData.data) {
+                            const total = systemData.data.totalDevices || 1;
+                            const online = systemData.data.healthyDevices || 0;
+                            summaryData.value.onlineRate = (online / total) * 100;
+                        }
+
+                        // 获取趋势数据
+                        const trendRes = await fetch(`${API_BASE}/charts/trend?startTime=${startTime}&endTime=${now}&interval=day`);
+                        const trendData_res = await trendRes.json();
+                        if (trendData_res.code === 200 && trendData_res.data) {
+                            trendData.value = trendData_res.data.series?.[0]?.data || [];
+                        }
+
+                        // 获取行为分布
+                        const behaviorRes = await fetch(`${API_BASE}/charts/behaviorDistribution?startTime=${startTime}&endTime=${now}`);
+                        const behaviorData_res = await behaviorRes.json();
+                        if (behaviorData_res.code === 200 && behaviorData_res.data) {
+                            behaviorData.value = behaviorData_res.data.distribution || [];
+                        }
+
+                        initCharts();
+                    } catch (error) {
+                        console.error('获取数据失败:', error);
+                    }
+                };
+
+                const initCharts = () => {
+                    // 折线图
+                    const lineChart = echarts.init(document.getElementById('chart-line'));
+                    const xData = trendData.value.map(d => {
+                        const date = new Date(d.timestamp);
+                        return `${date.getMonth() + 1}/${date.getDate()}`;
+                    });
+                    const yData = trendData.value.map(d => d.value || 0);
+
+                    lineChart.setOption({
+                        tooltip: { trigger: 'axis', backgroundColor: 'rgba(0,0,0,0.8)', textStyle: {color:'#fff'} },
+                        xAxis: { 
+                            type: 'category', 
+                            data: xData.length > 0 ? xData : ['1日','5日','10日','15日','20日','25日','30日'], 
+                            axisLine: {lineStyle:{color:'#475569'}} 
+                        },
+                        yAxis: { type: 'value', splitLine: {lineStyle:{color:'#1e293b'}} },
+                        series: [{
+                            data: yData.length > 0 ? yData : [12, 15, 8, 24, 18, 10, 5], 
+                            type: 'line', 
+                            smooth: true,
+                            itemStyle: { color: '#00f2ff' },
+                            areaStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'rgba(0,242,255,0.5)'},{offset:1,color:'rgba(0,242,255,0)'}]) }
+                        }]
+                    });
+
+                    // 饼图
+                    const pieChart = echarts.init(document.getElementById('chart-pie'));
+                    const pieData = behaviorData.value.map(b => ({
+                        value: b.count || 0,
+                        name: b.behavior || '未知',
+                        itemStyle: { color: ['#ff4d4f', '#fbbf24', '#34d399', '#60a5fa', '#a855f7'][behaviorData.value.indexOf(b) % 5] }
+                    }));
+
+                    pieChart.setOption({
+                        tooltip: { trigger: 'item' },
+                        legend: { bottom: '0%', textStyle: { color: '#fff' } },
+                        series: [{
+                            type: 'pie', 
+                            radius: ['40%', '70%'],
+                            itemStyle: { borderRadius: 5, borderColor: '#0f172a', borderWidth: 2 },
+                            data: pieData.length > 0 ? pieData : [
+                                { value: 40, name: '闭眼 (Fatigue)', itemStyle: {color: '#ff4d4f'} },
+                                { value: 30, name: '低头 (Distraction)', itemStyle: {color: '#fbbf24'} },
+                                { value: 20, name: '打哈欠 (Yarning)', itemStyle: {color: '#34d399'} },
+                                { value: 10, name: '其他', itemStyle: {color: '#60a5fa'} }
+                            ]
+                        }]
+                    });
+                };
+
+                const formatNumber = (num) => {
+                    return num.toLocaleString('zh-CN', { maximumFractionDigits: 0 });
+                };
+
+                onMounted(() => {
+                    fetchData();
+                });
+
+                return { drivers, summaryData, periodText, getScoreClass, formatNumber };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

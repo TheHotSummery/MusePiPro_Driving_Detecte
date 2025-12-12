@@ -1,0 +1,426 @@
+heatmap.html<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>疲劳事件热力分布 - RISC-V Platform</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    
+    <!-- 引入高德地图和热力图插件 -->
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: 'a0f65e66806bd8b70202e9d270bf74ca', 
+        };
+    </script>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=732a364f70864bb0c4ac3395cc3d5503"></script>
+
+    <style>
+        body { margin: 0; background: #020617; color: white; font-family: sans-serif; overflow: hidden; }
+        .glass-control {
+            background: rgba(13, 25, 48, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 242, 255, 0.2);
+            border-radius: 8px;
+        }
+        /* 自定义滑块样式 */
+        input[type=range] {
+            -webkit-appearance: none; background: transparent; width: 100%;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px;
+            border-radius: 50%; background: #00f2ff; margin-top: -6px; cursor: pointer;
+            box-shadow: 0 0 10px #00f2ff;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; background: #334155; border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="relative w-full h-screen">
+        
+        <!-- 返回按钮 -->
+        <a href="index.html" class="absolute top-4 left-4 z-50 glass-control w-10 h-10 flex items-center justify-center hover:bg-slate-700 transition text-cyan-400">
+            <i class="ri-arrow-left-line text-xl"></i>
+        </a>
+
+        <!-- 标题悬浮窗 -->
+        <div class="absolute top-4 left-16 z-50 glass-control px-6 py-2">
+            <h1 class="text-lg font-bold tracking-wider">疲劳事件时空分布热力图</h1>
+            <p class="text-xs text-gray-400">DATA SOURCE: RISC-V EDGE DEVICES</p>
+        </div>
+
+        <!-- 右侧图例 -->
+        <div class="absolute bottom-32 right-4 z-50 glass-control p-4 w-48">
+            <h3 class="text-xs font-bold text-gray-400 mb-2">风险等级 (RISK LEVEL)</h3>
+            <div class="flex items-center gap-2 text-xs mb-1"><div class="w-3 h-3 rounded-full bg-red-600"></div> 高风险 (Level 3)</div>
+            <div class="flex items-center gap-2 text-xs mb-1"><div class="w-3 h-3 rounded-full bg-yellow-400"></div> 中风险 (Level 2)</div>
+            <div class="flex items-center gap-2 text-xs"><div class="w-3 h-3 rounded-full bg-blue-400"></div> 低风险 (Level 1)</div>
+        </div>
+
+        <!-- 底部时间轴控制器 -->
+        <div class="absolute bottom-8 left-8 right-8 z-50 glass-control p-4 flex items-center gap-4">
+            <button @click="togglePlay" class="w-10 h-10 rounded-full bg-cyan-500 text-black flex items-center justify-center hover:bg-cyan-400 transition">
+                <i :class="isPlaying ? 'ri-pause-line' : 'ri-play-fill'"></i>
+            </button>
+            <div class="flex-1">
+                <div class="flex justify-between text-xs text-gray-400 mb-2">
+                    <span v-if="!isTrackMode">00:00</span>
+                    <span v-if="isTrackMode">起点</span>
+                    <span class="text-cyan-400 font-bold text-lg">{{ timeDisplay }}</span>
+                    <span v-if="!isTrackMode">23:59</span>
+                    <span v-if="isTrackMode">终点</span>
+                </div>
+                <input v-if="!isTrackMode" type="range" min="0" max="23" step="1" v-model="currentTime" @input="updateHeatmap">
+                <input v-if="isTrackMode" type="range" :min="0" :max="trackDataLength > 0 ? trackDataLength - 1 : 0" step="1" v-model.number="currentTrackIndex" @input="onTrackTimeChange" class="w-full">
+            </div>
+        </div>
+
+        <!-- 地图容器 -->
+        <div id="heatmap-container" class="w-full h-full"></div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+        
+        // 缓存管理器
+        const cacheManager = {
+            cache: new Map(),
+            maxAge: 300000, // 5分钟缓存（热力图数据变化不频繁）
+            
+            get(key) {
+                const item = this.cache.get(key);
+                if (!item) return null;
+                if (Date.now() - item.timestamp > this.maxAge) {
+                    this.cache.delete(key);
+                    return null;
+                }
+                return item.data;
+            },
+            
+            set(key, data) {
+                this.cache.set(key, {
+                    data,
+                    timestamp: Date.now()
+                });
+            }
+        };
+
+        // 防抖函数
+        const debounce = (func, wait) => {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        };
+
+        createApp({
+            setup() {
+                // 检查URL参数，判断是否为轨迹回放模式
+                const urlParams = new URLSearchParams(window.location.search);
+                const deviceId = urlParams.get('deviceId');
+                const mode = urlParams.get('mode');
+                const isTrackMode = mode === 'track' && deviceId;
+                
+                const currentTime = ref(12);
+                const isPlaying = ref(false);
+                const timeDisplay = ref('12:00 - 13:00');
+                let heatmapInstance = null;
+                let timer = null;
+                let updateTimer = null;
+
+                const API_BASE = '/api/v2/dashboard';
+
+                // 从API获取热力数据（带缓存）
+                const fetchHeatmapData = async (hour, useCache = true) => {
+                    const cacheKey = `heatmap_${hour}`;
+                    
+                    // 尝试从缓存获取
+                    if (useCache) {
+                        const cached = cacheManager.get(cacheKey);
+                        if (cached) {
+                            return cached;
+                        }
+                    }
+                    
+                    try {
+                        const now = Date.now();
+                        const startTime = now - (24 - hour) * 60 * 60 * 1000; // 从指定小时开始
+                        const endTime = startTime + 60 * 60 * 1000; // 1小时范围
+
+                        const res = await fetch(`${API_BASE}/map/heatmap?startTime=${startTime}&endTime=${endTime}`);
+                        const data = await res.json();
+                        
+                        if (data.code === 200 && data.data && data.data.points) {
+                            const points = data.data.points.map(p => ({
+                                lng: p.lng,
+                                lat: p.lat,
+                                count: Math.floor((p.intensity || 0) * 100) // 将强度转换为计数
+                            }));
+                            const result = { points, max: 100 };
+                            
+                            // 存入缓存
+                            cacheManager.set(cacheKey, result);
+                            return result;
+                        }
+                    } catch (error) {
+                        console.error('获取热力图数据失败:', error);
+                    }
+                    
+                    // 降级：返回空数据
+                    return { points: [], max: 100 };
+                };
+
+                // 防抖版本的更新函数
+                const debouncedUpdateHeatmap = debounce(async () => {
+                    timeDisplay.value = `${String(currentTime.value).padStart(2,'0')}:00 - ${String(Number(currentTime.value)+1).padStart(2,'0')}:00`;
+                    if(heatmapInstance) {
+                        const heatmapData = await fetchHeatmapData(currentTime.value, true);
+                        heatmapInstance.setData({
+                            data: heatmapData.points,
+                            max: heatmapData.max
+                        });
+                    }
+                }, 500); // 500ms防抖
+
+                const updateHeatmap = async () => {
+                    debouncedUpdateHeatmap();
+                };
+
+                const togglePlay = () => {
+                    if (isTrackMode) {
+                        // 轨迹回放模式
+                        if (isPlayingTrack) {
+                            pauseTrack();
+                        } else {
+                            playTrack();
+                        }
+                    } else {
+                        // 热力图模式
+                        isPlaying.value = !isPlaying.value;
+                        if(isPlaying.value) {
+                            timer = setInterval(async () => {
+                                if(currentTime.value >= 23) currentTime.value = 0;
+                                else currentTime.value = Number(currentTime.value) + 1;
+                                await updateHeatmap();
+                            }, 3000); // 每3秒切换一次（降低频率）
+                        } else {
+                            if (timer) clearInterval(timer);
+                        }
+                    }
+                };
+
+                // 检查URL参数，判断是否为轨迹回放模式
+                const urlParams = new URLSearchParams(window.location.search);
+                const deviceId = urlParams.get('deviceId');
+                const mode = urlParams.get('mode');
+                const isTrackMode = mode === 'track' && deviceId;
+
+                // 地图实例（需要在外部作用域定义，以便所有函数都能访问）
+                let map = null;
+                
+                // 轨迹回放相关变量
+                let trackPolyline = null;
+                let trackMarkers = [];
+                let eventMarkers = [];
+                let isPlayingTrack = false;
+                let trackTimer = null;
+                let currentTrackIndex = 0;
+                let trackData = [];
+
+                // 获取轨迹数据
+                const fetchTrackData = async (deviceId, startTime, endTime) => {
+                    try {
+                        const res = await fetch(`${API_BASE}/map/track?deviceId=${deviceId}&startTime=${startTime}&endTime=${endTime}`);
+                        const data = await res.json();
+                        if (data.code === 200 && data.data && data.data.track) {
+                            return data.data.track;
+                        }
+                    } catch (error) {
+                        console.error('获取轨迹数据失败:', error);
+                    }
+                    return [];
+                };
+
+                // 显示轨迹
+                const displayTrack = (track) => {
+                    if (!map || !track || track.length === 0) return;
+
+                    // 清除旧轨迹
+                    if (trackPolyline) map.remove(trackPolyline);
+                    trackMarkers.forEach(m => map.remove(m));
+                    eventMarkers.forEach(m => map.remove(m));
+                    trackMarkers = [];
+                    eventMarkers = [];
+
+                    // 创建轨迹线
+                    const path = track.map(p => [p.location.lng, p.location.lat]).filter(p => p[0] && p[1]);
+                    if (path.length > 0) {
+                        trackPolyline = new AMap.Polyline({
+                            path: path,
+                            strokeColor: '#00f2ff',
+                            strokeWeight: 3,
+                            strokeOpacity: 0.8
+                        });
+                        map.add(trackPolyline);
+
+                        // 添加轨迹点标记
+                        track.forEach((point, index) => {
+                            if (point.location && point.location.lat && point.location.lng) {
+                                const marker = new AMap.Marker({
+                                    position: [point.location.lng, point.location.lat],
+                                    title: `轨迹点 ${index + 1}`,
+                                    icon: new AMap.Icon({
+                                        size: new AMap.Size(8, 8),
+                                        image: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOCIgheight="8IiB2aWV3Qm94PSIwIDAgOCA4IiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjQiIGN5PSI0IiByPSIzIiBmaWxsPSIjMDBmMmZmIi8+PC9zdmc+',
+                                        imageSize: new AMap.Size(8, 8)
+                                    }),
+                                    zIndex: 100
+                                });
+                                trackMarkers.push(marker);
+                                map.add(marker);
+                            }
+
+                            // 添加事件标记
+                            if (point.events && point.events.length > 0) {
+                                point.events.forEach(event => {
+                                    if (event.location && event.location.lat && event.location.lng) {
+                                        const eventMarker = new AMap.Marker({
+                                            position: [event.location.lng, event.location.lat],
+                                            title: `${event.behavior} - ${event.level}`,
+                                            icon: new AMap.Icon({
+                                                size: new AMap.Size(16, 16),
+                                                image: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNyIgZmlsbD0iI2ZmNGQ0ZiIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIiLz48L3N2Zz4=',
+                                                imageSize: new AMap.Size(16, 16)
+                                            }),
+                                            zIndex: 200
+                                        });
+                                        eventMarkers.push(eventMarker);
+                                        map.add(eventMarker);
+                                    }
+                                });
+                            }
+                        });
+
+                        // 调整视野
+                        map.setFitView([trackPolyline, ...trackMarkers, ...eventMarkers]);
+                    }
+                };
+
+                // 播放轨迹
+                const playTrack = () => {
+                    if (trackData.length === 0) {
+                        alert('没有轨迹数据');
+                        return;
+                    }
+                    isPlayingTrack = true;
+                    isPlaying.value = true;
+                    if (trackTimer) {
+                        clearInterval(trackTimer);
+                    }
+                    trackTimer = setInterval(() => {
+                        if (currentTrackIndex.value < trackData.length - 1) {
+                            currentTrackIndex.value++;
+                            onTrackTimeChange();
+                        } else {
+                            pauseTrack();
+                        }
+                    }, 1000);
+                };
+
+                // 暂停轨迹
+                const pauseTrack = () => {
+                    isPlayingTrack = false;
+                    isPlaying.value = false;
+                    if (trackTimer) {
+                        clearInterval(trackTimer);
+                        trackTimer = null;
+                    }
+                };
+
+                onMounted(async () => {
+                    map = new AMap.Map("heatmap-container", {
+                        resizeEnable: true,
+                        center: [118.7969, 32.0603],
+                        zoom: 13,
+                        mapStyle: 'amap://styles/darkblue'
+                    });
+
+                    // 如果是轨迹回放模式
+                    if (isTrackMode) {
+                        // 获取最近24小时的轨迹数据
+                        const now = Date.now();
+                        const startTime = now - 24 * 60 * 60 * 1000;
+                        trackData = await fetchTrackData(deviceId, startTime, now);
+                        displayTrack(trackData);
+                        
+                        // 修改标题
+                        document.querySelector('h1').textContent = `车辆轨迹回放 - ${deviceId}`;
+                        
+                        // 轨迹回放模式下，初始化显示
+                        if (trackData.length > 0) {
+                            currentTrackIndex.value = 0;
+                            onTrackTimeChange();
+                        }
+                    } else {
+                        // 热力图模式
+                        heatmapInstance = new AMap.HeatMap(map, {
+                            radius: 25,
+                            opacity: [0, 0.8],
+                            gradient: {
+                                0.5: 'blue',
+                                0.65: 'rgb(117,211,248)',
+                                0.7: 'rgb(0, 255, 0)',
+                                0.9: '#ffea00',
+                                1.0: 'red'
+                            }
+                        });
+                        
+                        // 初始加载（不使用缓存，确保数据最新）
+                        await fetchHeatmapData(currentTime.value, false).then(data => {
+                            heatmapInstance.setData({
+                                data: data.points,
+                                max: data.max
+                            });
+                        });
+                    }
+                });
+
+                onUnmounted(() => {
+                    if (timer) clearInterval(timer);
+                    if (updateTimer) clearTimeout(updateTimer);
+                    if (trackTimer) {
+                        clearInterval(trackTimer);
+                        trackTimer = null;
+                    }
+                    if (map) {
+                        map.destroy();
+                    }
+                });
+
+                // 计算轨迹数据长度（用于模板）
+                const trackDataLength = computed(() => trackData.length);
+                
+                return { 
+                    currentTime, 
+                    isPlaying, 
+                    timeDisplay, 
+                    togglePlay, 
+                    updateHeatmap,
+                    isTrackMode,
+                    currentTrackIndex,
+                    onTrackTimeChange,
+                    trackDataLength
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

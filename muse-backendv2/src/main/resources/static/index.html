@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RISC-V 疲劳驾驶检测平台 - 智能驾驶舱</title>
+    
+    <!-- 引入 Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- 引入 Element Plus (可选，用于图标等) -->
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
+    <!-- 引入 ECharts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <!-- 引入 TailwindCSS (快速布局) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 
+        ===========================================================
+        高德地图配置区域
+        请在此处填入你的 Key 和 安全密钥
+        ===========================================================
+    -->
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: 'a0f65e66806bd8b70202e9d270bf74ca', 
+        };
+    </script>
+    <script src="https://webapi.amap.com/maps?v=2.0&key=732a364f70864bb0c4ac3395cc3d5503"></script>
+
+    <style>
+        /* --- 全局字体与背景 --- */
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;700&display=swap');
+
+        body {
+            background-color: #020617;
+            color: #e2e8f0;
+            font-family: 'Noto Sans SC', sans-serif;
+            overflow: hidden; /* 防止滚动 */
+            margin: 0;
+            padding: 0;
+        }
+
+        .font-tech {
+            font-family: 'Rajdhani', sans-serif; /* 科技感数字字体 */
+        }
+
+        /* --- 科技感背景网格动画 --- */
+        .bg-grid {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 242, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 242, 255, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            z-index: -1;
+            animation: gridMove 20s linear infinite;
+        }
+
+        @keyframes gridMove {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(40px); }
+        }
+
+        /* --- 玻璃拟态卡片 --- */
+        .glass-panel {
+            background: rgba(13, 25, 48, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 242, 255, 0.1);
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            position: relative;
+            clip-path: polygon(
+                0 0, 
+                100% 0, 
+                100% calc(100% - 20px), 
+                calc(100% - 20px) 100%, 
+                0 100%
+            ); /* 右下角切角 */
+        }
+
+        /* 卡片装饰线 */
+        .glass-panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, #00f2ff, transparent);
+        }
+
+        .glass-panel::after {
+            content: '';
+            position: absolute;
+            bottom: 0; right: 0; width: 20px; height: 20px;
+            border-bottom: 2px solid #00f2ff;
+            border-right: 2px solid #00f2ff;
+        }
+
+        /* --- 标题光效 --- */
+        .header-title {
+            background: linear-gradient(to bottom, #ffffff, #84ccff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+        }
+
+        /* --- 滚动条美化 --- */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #00f2ff; border-radius: 2px; }
+
+        /* --- 告警列表动画 --- */
+        .alert-item {
+            animation: slideIn 0.5s ease-out forwards;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* --- 地图容器 --- */
+        #map-container {
+            width: 100%;
+            height: 100%;
+            background: #050b14; /* 地图加载前的底色 */
+        }
+        
+        /* 自定义高德地图 InfoWindow */
+        .amap-info-content {
+            background: rgba(13, 25, 48, 0.9) !important;
+            border: 1px solid #00f2ff !important;
+            color: white !important;
+            box-shadow: 0 0 15px #00f2ff44 !important;
+        }
+        .amap-info-sharp { border-top-color: #00f2ff !important; }
+    </style>
+</head>
+<body>
+    <div id="app" class="relative w-screen h-screen overflow-hidden text-sm">
+        
+        <!-- 背景动效 -->
+        <div class="bg-grid"></div>
+
+        <!-- 1. 顶部 Header -->
+        <header class="absolute top-0 left-0 w-full h-20 z-50 flex justify-between items-center px-8 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+            <div class="flex items-center gap-4 pointer-events-auto">
+                <!-- 简易Logo -->
+                <div class="w-10 h-10 border-2 border-cyan-400 rounded-full flex items-center justify-center animate-pulse shadow-[0_0_15px_#00f2ff]">
+                    <span class="font-tech font-bold text-xl text-cyan-400">R</span>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold header-title tracking-wider">疲劳感知与分级预警系统后台监控
+                    </h1>
+                    <p class="text-xs text-cyan-200/60 tracking-[0.2em] uppercase">Real-time Driver Monitoring System</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-6 pointer-events-auto">
+                <div class="text-right">
+                    <div class="text-2xl font-tech text-white">{{ currentTime }}</div>
+                    <div class="text-xs text-gray-400">{{ currentDate }}</div>
+                </div>
+                <!-- 状态指示灯 -->
+                <div class="flex gap-2">
+                    <span class="px-3 py-1 rounded bg-green-500/20 border border-green-500 text-green-400 text-xs">SYSTEM ONLINE</span>
+                    <span class="px-3 py-1 rounded bg-blue-500/20 border border-blue-500 text-blue-400 text-xs">MAP READY</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 2. 地图层 (底层) -->
+        <div class="absolute inset-0 z-0">
+            <div id="map-container"></div>
+        </div>
+
+        <!-- 3. 左侧面板 -->
+        <div class="absolute left-6 top-24 bottom-6 w-80 flex flex-col gap-4 z-10 pointer-events-none">
+            
+            <!-- 3.1 核心指标 (HUD风格) -->
+            <div class="glass-panel p-4 pointer-events-auto">
+                <h3 class="text-cyan-400 text-lg font-bold mb-3 border-l-4 border-cyan-400 pl-2">实时概览</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-blue-900/30 p-3 rounded border border-blue-500/30">
+                        <div class="text-gray-400 text-xs">在线车辆</div>
+                        <div class="text-2xl font-tech text-white">{{ realtimeData.onlineVehicles }}<span class="text-sm text-gray-500">/{{ realtimeData.totalVehicles }}</span></div>
+                    </div>
+                    <div class="bg-red-900/30 p-3 rounded border border-red-500/30 animate-pulse">
+                        <div class="text-gray-400 text-xs">活跃告警</div>
+                        <div class="text-2xl font-tech text-red-500">{{ realtimeData.activeAlerts }}</div>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <div class="flex justify-between text-xs mb-1 text-gray-300">
+                        <span>系统健康度</span>
+                        <span class="font-tech">98%</span>
+                    </div>
+                    <div class="w-full bg-gray-700 h-1 rounded-full overflow-hidden">
+                        <div class="bg-gradient-to-r from-green-400 to-cyan-400 h-full w-[98%]"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3.2 疲劳趋势图表 -->
+            <div class="glass-panel p-4 flex-1 pointer-events-auto flex flex-col">
+                <h3 class="text-cyan-400 text-lg font-bold mb-2 border-l-4 border-cyan-400 pl-2">疲劳指数趋势</h3>
+                <div id="chart-trend" class="flex-1 w-full"></div>
+            </div>
+
+            <!-- 3.3 行为分布 -->
+            <div class="glass-panel p-4 h-64 pointer-events-auto flex flex-col">
+                <h3 class="text-cyan-400 text-lg font-bold mb-2 border-l-4 border-cyan-400 pl-2">异常行为类型</h3>
+                <div id="chart-radar" class="flex-1 w-full"></div>
+            </div>
+        </div>
+
+        <!-- 4. 右侧面板 -->
+        <div class="absolute right-6 top-24 bottom-6 w-80 flex flex-col gap-4 z-10 pointer-events-none">
+            
+            <!-- 4.1 区域风险排行 -->
+            <div class="glass-panel p-4 h-64 pointer-events-auto flex flex-col">
+                <h3 class="text-cyan-400 text-lg font-bold mb-2 border-l-4 border-cyan-400 pl-2">区域风险分布</h3>
+                <div id="chart-region" class="flex-1 w-full"></div>
+            </div>
+
+            <!-- 4.2 实时告警流 -->
+            <div class="glass-panel p-4 flex-1 pointer-events-auto overflow-hidden flex flex-col">
+                <h3 class="text-cyan-400 text-lg font-bold mb-3 border-l-4 border-cyan-400 pl-2">实时告警监控</h3>
+                <div class="overflow-y-auto flex-1 pr-2 space-y-2">
+                    <div v-for="alert in alerts" :key="alert.alertId" 
+                         @click="showDriverEventsOnMap(alert.driverId, alert.driverName)"
+                         class="alert-item p-3 rounded bg-gradient-to-r from-gray-800 to-transparent border-l-2 cursor-pointer hover:bg-gray-700/50 transition"
+                         :class="getLevelColorClass(alert.level)">
+                        <div class="flex justify-between items-start mb-1">
+                            <span class="font-bold text-gray-200">{{ alert.driverName }}</span>
+                            <span class="font-tech text-xs px-1 rounded text-black font-bold" :class="getLevelBgClass(alert.level)">{{ alert.level }}</span>
+                        </div>
+                        <div class="text-xs text-gray-400 mb-1">ID: {{ alert.deviceId }}</div>
+                        <div class="flex justify-between items-center text-xs">
+                            <span class="text-white">{{ alert.behavior }}</span>
+                            <span class="font-tech text-gray-500">{{ formatTime(alert.timestamp) }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. 底部控制栏 (可选) -->
+        <div class="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 glass-panel px-8 py-2 rounded-full flex gap-8 pointer-events-auto">
+            <a href="monitor.html" class="flex flex-col items-center cursor-pointer group">
+                <span class="text-cyan-400 group-hover:text-white transition-colors">🚗</span>
+                <span class="text-[10px] text-gray-400 mt-1">车辆监控</span>
+            </a>
+            <a href="heatmap.html" class="flex flex-col items-center cursor-pointer group">
+                <span class="text-red-400 group-hover:text-white transition-colors">🔥</span>
+                <span class="text-[10px] text-gray-400 mt-1">疲劳热力</span>
+            </a>
+            <a href="report.html" class="flex flex-col items-center cursor-pointer group">
+                <span class="text-green-400 group-hover:text-white transition-colors">📊</span>
+                <span class="text-[10px] text-gray-400 mt-1">数据报表</span>
+            </a>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, onUnmounted } = Vue;
+
+        // API基础URL
+        const API_BASE = '/api/v2/dashboard';
+
+        // --- 工具函数：防抖和节流 ---
+        const debounce = (func, wait) => {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        };
+
+        const throttle = (func, limit) => {
+            let inThrottle;
+            return function(...args) {
+                if (!inThrottle) {
+                    func.apply(this, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            };
+        };
+
+        // --- 本地缓存管理 ---
+        const cacheManager = {
+            cache: new Map(),
+            maxAge: 30000, // 30秒缓存
+            maxSize: 100, // 最多缓存100条
+            
+            get(key) {
+                const item = this.cache.get(key);
+                if (!item) return null;
+                if (Date.now() - item.timestamp > this.maxAge) {
+                    this.cache.delete(key);
+                    return null;
+                }
+                return item.data;
+            },
+            
+            set(key, data) {
+                // 如果缓存已满，删除最旧的
+                if (this.cache.size >= this.maxSize) {
+                    const firstKey = this.cache.keys().next().value;
+                    this.cache.delete(firstKey);
+                }
+                this.cache.set(key, {
+                    data,
+                    timestamp: Date.now()
+                });
+            },
+            
+            generateKey(url, params) {
+                return `${url}_${JSON.stringify(params)}`;
+            }
+        };
+
+        createApp({
+            setup() {
+                // --- 状态数据 ---
+                const currentTime = ref('');
+                const currentDate = ref('');
+                const realtimeData = ref({
+                    totalVehicles: 0,
+                    onlineVehicles: 0,
+                    activeAlerts: 0
+                });
+                const alerts = ref([]);
+                const trendData = ref([]);
+                const behaviorData = ref({});
+                const regionData = ref([]);
+
+                // --- 地图实例 ---
+                let map = null;
+                let markers = [];
+                let eventMarkers = []; // 事件标记数组
+                let mapMoveTimer = null;
+                let isMapMoving = false;
+                let lastMapBounds = null;
+                const MAP_UPDATE_DELAY = 800; // 地图停止移动后800ms才更新
+                const MAP_MOVE_THRESHOLD = 0.01; // 地图移动超过0.01度才更新
+
+                // --- 工具函数 ---
+                const formatTime = (ts) => {
+                    const d = new Date(ts);
+                    return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+                };
+
+                const updateTime = () => {
+                    const now = new Date();
+                    currentTime.value = now.toLocaleTimeString('en-GB'); // 24h format
+                    currentDate.value = now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+                };
+
+                const getLevelColorClass = (level) => {
+                    if (level === 'Level 3') return 'border-red-500';
+                    if (level === 'Level 2') return 'border-orange-500';
+                    return 'border-yellow-400';
+                };
+
+                const getLevelBgClass = (level) => {
+                    if (level === 'Level 3') return 'bg-red-500';
+                    if (level === 'Level 2') return 'bg-orange-500';
+                    return 'bg-yellow-400';
+                };
+
+                // --- API 数据获取（带缓存） ---
+                const fetchWithCache = async (url, params = {}) => {
+                    const cacheKey = cacheManager.generateKey(url, params);
+                    const cached = cacheManager.get(cacheKey);
+                    if (cached) {
+                        return cached;
+                    }
+                    
+                    try {
+                        const queryString = new URLSearchParams(params).toString();
+                        const fullUrl = queryString ? `${url}?${queryString}` : url;
+                        const response = await fetch(fullUrl);
+                        const data = await response.json();
+                        cacheManager.set(cacheKey, data);
+                        return data;
+                    } catch (error) {
+                        console.error('API请求失败:', error);
+                        throw error;
+                    }
+                };
+
+                const fetchRealtimeData = async () => {
+                    try {
+                        // 获取实时车辆状态（不使用缓存，因为需要实时性）
+                        const vehiclesRes = await fetch(`${API_BASE}/realtime/vehicles`);
+                        const vehiclesData = await vehiclesRes.json();
+                        if (vehiclesData.code === 200 && vehiclesData.data) {
+                            realtimeData.value.totalVehicles = vehiclesData.data.totalVehicles || 0;
+                            realtimeData.value.onlineVehicles = vehiclesData.data.onlineVehicles || 0;
+                        }
+
+                        // 获取实时告警（不使用缓存）
+                        const alertsRes = await fetch(`${API_BASE}/realtime/alerts`);
+                        const alertsData = await alertsRes.json();
+                        if (alertsData.code === 200 && alertsData.data) {
+                            alerts.value = (alertsData.data.alerts || []).slice(0, 20).map(a => ({
+                                alertId: a.eventId || a.alertId,
+                                driverId: a.driverId || '',
+                                driverName: a.driverName || '未知',
+                                deviceId: a.deviceId || '',
+                                level: a.level || 'Normal',
+                                behavior: a.behavior || '未知行为',
+                                timestamp: a.timestamp || Date.now(),
+                                location: a.location || null,
+                                score: a.score || 0
+                            }));
+                            realtimeData.value.activeAlerts = alerts.value.length;
+                        }
+                    } catch (error) {
+                        console.error('获取实时数据失败:', error);
+                    }
+                };
+
+                const fetchChartData = async () => {
+                    try {
+                        const now = Date.now();
+                        const startTime = now - 24 * 60 * 60 * 1000; // 最近24小时
+
+                        // 获取趋势数据（使用缓存）
+                        const trendData_res = await fetchWithCache(`${API_BASE}/charts/trend`, {
+                            startTime,
+                            endTime: now,
+                            interval: 'hour'
+                        });
+                        if (trendData_res.code === 200 && trendData_res.data) {
+                            trendData.value = trendData_res.data.series?.[0]?.data || [];
+                        }
+
+                        // 获取行为分布（使用缓存）
+                        const behaviorData_res = await fetchWithCache(`${API_BASE}/charts/behaviorDistribution`, {
+                            startTime,
+                            endTime: now
+                        });
+                        if (behaviorData_res.code === 200 && behaviorData_res.data) {
+                            behaviorData.value = behaviorData_res.data.distribution || {};
+                        }
+
+                        // 获取区域分布（使用缓存）
+                        const regionData_res = await fetchWithCache(`${API_BASE}/charts/regionDistribution`, {
+                            startTime,
+                            endTime: now
+                        });
+                        if (regionData_res.code === 200 && regionData_res.data) {
+                            // 后端返回的是data字段，不是distribution
+                            regionData.value = regionData_res.data.data || regionData_res.data.distribution || [];
+                        }
+                    } catch (error) {
+                        console.error('获取图表数据失败:', error);
+                    }
+                };
+
+                // --- ECharts 初始化 ---
+                let trendChart, radarChart, regionChart;
+                const initCharts = () => {
+                    // 1. 趋势图 (折线)
+                    trendChart = echarts.init(document.getElementById('chart-trend'));
+                    updateTrendChart();
+
+                    // 2. 行为雷达图
+                    radarChart = echarts.init(document.getElementById('chart-radar'));
+                    updateRadarChart();
+
+                    // 3. 区域排行 (横向柱状图)
+                    regionChart = echarts.init(document.getElementById('chart-region'));
+                    updateRegionChart();
+
+                    window.addEventListener('resize', () => {
+                        trendChart?.resize();
+                        radarChart?.resize();
+                        regionChart?.resize();
+                    });
+                };
+
+                const updateTrendChart = () => {
+                    if (!trendChart) return;
+                    const xData = trendData.value.map(d => {
+                        const date = new Date(d.timestamp);
+                        return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+                    });
+                    const yData = trendData.value.map(d => d.value || 0);
+
+                    trendChart.setOption({
+                        tooltip: { trigger: 'axis', backgroundColor: 'rgba(0,0,0,0.7)', borderColor: '#00f2ff', textStyle: { color: '#fff' } },
+                        grid: { top: 10, right: 10, bottom: 20, left: 30, containLabel: true },
+                        xAxis: { 
+                            type: 'category', 
+                            data: xData.length > 0 ? xData : ['10:00', '10:05', '10:10', '10:15', '10:20', '10:25'],
+                            axisLine: { lineStyle: { color: '#334155' } },
+                            axisLabel: { color: '#94a3b8' }
+                        },
+                        yAxis: { 
+                            type: 'value', 
+                            splitLine: { lineStyle: { color: '#1e293b', type: 'dashed' } },
+                            axisLabel: { color: '#94a3b8' }
+                        },
+                        series: [{
+                            data: yData.length > 0 ? yData : [45, 55, 82, 60, 70, 90],
+                            type: 'line',
+                            smooth: true,
+                            symbol: 'none',
+                            lineStyle: { color: '#00f2ff', width: 3 },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(0, 242, 255, 0.5)' },
+                                    { offset: 1, color: 'rgba(0, 242, 255, 0)' }
+                                ])
+                            }
+                        }]
+                    });
+                };
+
+                const updateRadarChart = () => {
+                    if (!radarChart) return;
+                    const behaviorNames = ['eyes_closed', 'yarning', 'head_down', 'seeing_left', 'seeing_right'];
+                    const behaviorLabels = ['闭眼', '打哈欠', '低头', '左看', '右看'];
+                    const values = behaviorNames.map(name => behaviorData.value[name] || 0);
+
+                    radarChart.setOption({
+                        radar: {
+                            indicator: behaviorLabels.map(label => ({ name: label, max: 100 })),
+                            splitArea: { areaStyle: { color: ['rgba(13, 25, 48, 0.6)', 'rgba(13, 25, 48, 0.8)'] } },
+                            axisLine: { lineStyle: { color: '#334155' } },
+                            splitLine: { lineStyle: { color: '#334155' } },
+                            name: { textStyle: { color: '#00f2ff' } }
+                        },
+                        series: [{
+                            type: 'radar',
+                            data: [{
+                                value: values.length > 0 ? values : [80, 50, 60, 30, 20],
+                                name: '行为统计',
+                                itemStyle: { color: '#ff4d4f' },
+                                areaStyle: { color: 'rgba(255, 77, 79, 0.4)' }
+                            }]
+                        }]
+                    });
+                };
+
+                const updateRegionChart = () => {
+                    if (!regionChart) return;
+                    const topRegions = regionData.value.slice(0, 10);
+                    const names = topRegions.map(r => r.regionName || '未知区域');
+                    // 后端返回的是count字段，不是eventCount
+                    const values = topRegions.map(r => r.count || r.eventCount || 0);
+
+                    regionChart.setOption({
+                        grid: { top: 0, right: 20, bottom: 20, left: 10, containLabel: true },
+                        xAxis: { type: 'value', show: false },
+                        yAxis: { 
+                            type: 'category', 
+                            data: names.length > 0 ? names : ['鼓楼区', '秦淮区', '建邺区', '玄武区'],
+                            axisLine: { show: false },
+                            axisTick: { show: false },
+                            axisLabel: { color: '#fff' }
+                        },
+                        series: [{
+                            type: 'bar',
+                            data: values.length > 0 ? values : [45, 60, 75, 82],
+                            barWidth: 10,
+                            itemStyle: {
+                                borderRadius: [0, 5, 5, 0],
+                                color: new echarts.graphic.LinearGradient(1, 0, 0, 0, [
+                                    { offset: 0, color: '#ff4d4f' },
+                                    { offset: 1, color: '#8b0000' }
+                                ])
+                            },
+                            label: { show: true, position: 'right', color: '#fff', formatter: '{c}' }
+                        }]
+                    });
+                };
+
+                // --- 地图初始化 ---
+                const initMap = () => {
+                    if (!window.AMap) {
+                        console.error("高德地图API未加载，请检查Key配置");
+                        return;
+                    }
+
+                    map = new AMap.Map('map-container', {
+                        resizeEnable: true,
+                        center: [118.7969, 32.0603], // 南京坐标
+                        zoom: 11,
+                        pitch: 50, // 3D 视角
+                        viewMode: '3D',
+                        mapStyle: 'amap://styles/darkblue', // 极夜蓝风格
+                    });
+
+                    // 加载车辆标记（带缓存和防抖）
+                    const loadVehicles = async (useCache = true) => {
+                        try {
+                            // 获取当前地图边界
+                            const bounds = map.getBounds();
+                            const boundsStr = bounds ? `${bounds.getSouthWest().lng},${bounds.getSouthWest().lat},${bounds.getNorthEast().lng},${bounds.getNorthEast().lat}` : '';
+                            
+                            // 检查边界是否变化足够大
+                            if (lastMapBounds && bounds) {
+                                const sw = bounds.getSouthWest();
+                                const ne = bounds.getNorthEast();
+                                const lastSw = lastMapBounds.getSouthWest();
+                                const lastNe = lastMapBounds.getNorthEast();
+                                
+                                const latDiff = Math.abs(sw.lat - lastSw.lat) + Math.abs(ne.lat - lastNe.lat);
+                                const lngDiff = Math.abs(sw.lng - lastSw.lng) + Math.abs(ne.lng - lastNe.lng);
+                                
+                                // 如果移动距离小于阈值，且使用缓存，则跳过
+                                if (useCache && latDiff < MAP_MOVE_THRESHOLD && lngDiff < MAP_MOVE_THRESHOLD) {
+                                    return;
+                                }
+                            }
+                            
+                            lastMapBounds = bounds;
+                            
+                            // 使用缓存获取数据
+                            const data = useCache ? 
+                                await fetchWithCache(`${API_BASE}/map/vehicles`, { bounds: boundsStr }) :
+                                await (await fetch(`${API_BASE}/map/vehicles${boundsStr ? '?bounds=' + boundsStr : ''}`)).json();
+                            
+                            if (data.code === 200 && data.data && data.data.vehicles) {
+                                // 清除旧标记
+                                markers.forEach(m => map.remove(m));
+                                markers = [];
+
+                                data.data.vehicles.forEach(vehicle => {
+                                    if (vehicle.location && vehicle.location.lat && vehicle.location.lng) {
+                                        const content = `
+                                            <div style="position:relative;">
+                                                <div style="width:16px;height:16px;background:#00f2ff;border-radius:50%;box-shadow:0 0 10px #00f2ff; border:2px solid white;"></div>
+                                                <div style="position:absolute;top:-30px;left:-20px;background:rgba(0,0,0,0.7);color:#00f2ff;padding:2px 5px;border:1px solid #00f2ff;font-size:10px;white-space:nowrap;">
+                                                    ${vehicle.deviceId || 'UNKNOWN'}
+                                                </div>
+                                            </div>
+                                        `;
+                                        
+                                        const marker = new AMap.Marker({
+                                            position: [vehicle.location.lng, vehicle.location.lat],
+                                            content: content,
+                                            offset: new AMap.Pixel(-8, -8),
+                                            map: map
+                                        });
+                                        
+                                        // 添加点击事件，打开历史轨迹
+                                        marker.on('click', () => {
+                                            if (vehicle.deviceId) {
+                                                // 跳转到轨迹回放页面，传递设备ID
+                                                window.location.href = `heatmap.html?deviceId=${vehicle.deviceId}&mode=track`;
+                                            }
+                                        });
+                                        
+                                        markers.push(marker);
+                                    }
+                                });
+                            }
+                        } catch (error) {
+                            console.error('加载车辆数据失败:', error);
+                        }
+                    };
+
+                    // 防抖版本的加载函数
+                    const debouncedLoadVehicles = debounce(() => {
+                        isMapMoving = false;
+                        loadVehicles(true); // 使用缓存
+                    }, MAP_UPDATE_DELAY);
+
+                    // 节流版本的加载函数（用于拖动过程中）
+                    const throttledLoadVehicles = throttle(() => {
+                        if (!isMapMoving) {
+                            isMapMoving = true;
+                        }
+                    }, 200);
+
+                    // 地图移动开始
+                    map.on('movestart', () => {
+                        isMapMoving = true;
+                        if (mapMoveTimer) clearTimeout(mapMoveTimer);
+                    });
+
+                    // 地图移动中（节流）
+                    map.on('moveend', () => {
+                        throttledLoadVehicles();
+                        // 移动结束后，等待一段时间再加载（防抖）
+                        debouncedLoadVehicles();
+                    });
+
+                    // 地图缩放（防抖）
+                    map.on('zoomend', debouncedLoadVehicles);
+
+                    // 地图拖拽结束（防抖）
+                    map.on('dragend', debouncedLoadVehicles);
+                    
+                    // 初始加载
+                    setTimeout(() => loadVehicles(false), 1000); // 首次加载不使用缓存
+                    
+                    // 定期更新车辆位置（不使用缓存，确保数据新鲜）
+                    setInterval(() => {
+                        if (!isMapMoving) {
+                            loadVehicles(false);
+                        }
+                    }, 30000); // 每30秒更新一次（降低频率）
+                };
+
+                // --- 实时数据更新（节流） ---
+                let dataTimer = null;
+                const startDataUpdate = () => {
+                    // 立即获取一次数据
+                    fetchRealtimeData();
+                    fetchChartData();
+                    
+                    // 定期更新数据（使用节流，降低频率）
+                    dataTimer = setInterval(() => {
+                        fetchRealtimeData(); // 实时数据不使用缓存
+                        fetchChartData(); // 图表数据使用缓存
+                        // 更新图表
+                        updateTrendChart();
+                        updateRadarChart();
+                        updateRegionChart();
+                    }, 20000); // 每20秒更新一次（降低频率）
+                };
+
+                onMounted(() => {
+                    setInterval(updateTime, 1000);
+                    updateTime();
+                    initMap();
+                    initCharts();
+                    startDataUpdate();
+                });
+
+                onUnmounted(() => {
+                    if (dataTimer) clearInterval(dataTimer);
+                    if (map) map.destroy();
+                });
+
+                // 显示驾驶员的所有事件在地图上
+                const showDriverEventsOnMap = async (driverId, driverName) => {
+                    if (!driverId || !map) {
+                        alert('无法获取驾驶员信息');
+                        return;
+                    }
+                    
+                    try {
+                        // 清除旧的事件标记
+                        eventMarkers.forEach(marker => map.remove(marker));
+                        eventMarkers = [];
+                        
+                        // 获取最近24小时内该驾驶员的所有告警事件
+                        const now = Date.now();
+                        const startTime = now - 24 * 60 * 60 * 1000;
+                        const alertsRes = await fetch(`${API_BASE}/realtime/alerts`);
+                        const alertsData = await alertsRes.json();
+                        
+                        if (alertsData.code === 200 && alertsData.data && alertsData.data.alerts) {
+                            // 筛选该驾驶员的事件
+                            const driverEvents = alertsData.data.alerts.filter(a => a.driverId === driverId);
+                            
+                            if (driverEvents.length === 0) {
+                                alert(`未找到驾驶员 ${driverName} 的最近事件`);
+                                return;
+                            }
+                                
+                                // 在地图上标注事件
+                                driverEvents.forEach(event => {
+                                    if (event.location && event.location.lat != null && event.location.lng != null) {
+                                        // 处理BigDecimal类型或普通数字
+                                        let lat = event.location.lat;
+                                        let lng = event.location.lng;
+                                        
+                                        // 如果是对象（BigDecimal），转换为数字
+                                        if (typeof lat === 'object' && lat !== null) {
+                                            lat = parseFloat(lat.toString());
+                                        }
+                                        if (typeof lng === 'object' && lng !== null) {
+                                            lng = parseFloat(lng.toString());
+                                        }
+                                        
+                                        if (isNaN(lat) || isNaN(lng)) {
+                                            console.warn('无效的坐标:', event.location);
+                                            return;
+                                        }
+                                        
+                                        // 根据级别设置颜色
+                                        let color = '#ffd700'; // Level 1 - 黄色
+                                        let size = 12;
+                                        if (event.level === 'Level 3') {
+                                            color = '#ff0000'; // Level 3 - 红色
+                                            size = 16;
+                                        } else if (event.level === 'Level 2') {
+                                            color = '#ff8c00'; // Level 2 - 橙色
+                                            size = 14;
+                                        }
+                                        
+                                        const marker = new AMap.Marker({
+                                            position: [lng, lat],
+                                            icon: new AMap.Icon({
+                                                size: new AMap.Size(size, size),
+                                                image: `data:image/svg+xml;base64,${btoa(`<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><circle cx="${size/2}" cy="${size/2}" r="${size/2-1}" fill="${color}" stroke="#fff" stroke-width="1"/></svg>`)}`,
+                                                imageSize: new AMap.Size(size, size)
+                                            }),
+                                            title: `${event.behavior || '未知'} - ${event.level || 'Normal'}`,
+                                            zIndex: 200,
+                                            map: map
+                                        });
+                                        
+                                        // 添加点击事件显示详情
+                                        marker.on('click', () => {
+                                            const infoWindow = new AMap.InfoWindow({
+                                                content: `
+                                                    <div style="color: #fff; padding: 8px; min-width: 200px;">
+                                                        <div style="font-weight: bold; margin-bottom: 4px; color: #00f2ff;">${driverName || '未知'}</div>
+                                                        <div style="font-size: 12px; color: #ccc; margin-bottom: 2px;">行为: ${event.behavior || '未知'}</div>
+                                                        <div style="font-size: 12px; color: #ccc; margin-bottom: 2px;">级别: ${event.level || 'Normal'}</div>
+                                                        <div style="font-size: 12px; color: #ccc; margin-bottom: 2px;">分数: ${event.score ? event.score.toFixed(1) : '0'}</div>
+                                                        <div style="font-size: 12px; color: #ccc;">时间: ${formatTime(event.timestamp)}</div>
+                                                    </div>
+                                                `,
+                                                offset: new AMap.Pixel(0, -10)
+                                            });
+                                            infoWindow.open(map, marker.getPosition());
+                                        });
+                                        
+                                        eventMarkers.push(marker);
+                                    }
+                                });
+                                
+                                // 调整地图视野以显示所有事件
+                                if (eventMarkers.length > 0) {
+                                    map.setFitView(eventMarkers);
+                                    console.log(`已在地图上标注 ${eventMarkers.length} 个事件`);
+                                } else {
+                                    alert('事件数据中没有位置信息');
+                                }
+                        } else {
+                            alert('获取事件数据失败');
+                        }
+                    } catch (error) {
+                        console.error('获取驾驶员事件失败:', error);
+                        alert('获取事件数据失败，请稍后重试: ' + error.message);
+                    }
+                };
+                
+                const toggleLayer = (layerName) => {
+                    console.log('Toggle Layer:', layerName);
+                    if (layerName === 'vehicles') {
+                        // 切换车辆标记显示/隐藏
+                        if (markers && markers.length > 0) {
+                            const isVisible = markers[0].getMap() !== null;
+                            markers.forEach(marker => {
+                                if (isVisible) {
+                                    marker.hide();
+                                } else {
+                                    marker.show();
+                                }
+                            });
+                        }
+                    } else if (layerName === 'heatmap') {
+                        // 跳转到热力图页面
+                        window.location.href = 'heatmap.html';
+                    }
+                };
+
+                return {
+                    currentTime,
+                    currentDate,
+                    realtimeData,
+                    alerts,
+                    formatTime,
+                    getLevelColorClass,
+                    getLevelBgClass,
+                    toggleLayer,
+                    showDriverEventsOnMap
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
