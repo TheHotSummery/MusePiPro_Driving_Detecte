@@ -1,4 +1,6 @@
-<<<<<<< HEAD
+
+Muse Pi Pro 驾驶行为检测系统-github 镜像,原始仓库：https://gitee.com/achenjiayi/MusePiPro_Driving_Detecte
+
 # Muse Pi Pro 驾驶行为检测系统
 
 ## 项目概述
@@ -417,8 +419,4 @@ https://gitee.com/achenjiayi/MusePiPro_Driving_Detecte
 MIT License
 
 ---
-**日期**：2025-07-30
-=======
-# MusePiPro_Driving_Detecte
-Muse Pi Pro 驾驶行为检测系统-github 镜像
->>>>>>> 2771c4f23757e74189c7ab10e848d38c834265d8
+# 
