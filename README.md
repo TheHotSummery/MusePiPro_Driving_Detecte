@@ -19,6 +19,9 @@
 ## 系统架构
 
 系统采用 **单进程 + 多线程后端模型**，其中 PLC Runtime 作为独立进程运行，由 Supervisor 统一管理，确保高可用性。
+	
+![architecture](./assets/architecture.JPG)
+
 
 ### 1. 进程与模块划分
 *   **Supervisor**：负责进程拉起、状态监控与异常重启。当 PLC Runtime 崩溃时自动尝试重启。
@@ -32,11 +35,11 @@
 系统内置严格的心跳监测与异常处理机制：
 *   **YOLO 崩溃/卡死**：PLC 检测不到心跳，自动关闭所有输出，状态指示灯进入“快闪”报错模式。
 *   **PLC 崩溃**：Supervisor 捕获信号，自动尝试重启 PLC Runtime，期间硬件输出复位。
-*   **断电保护**：系统意外断电后，GPIO 恢复默认高阻或安全电平，防止执行器误动作。
+*   **断电保护**：系统意外断电后，总输出采用机械拉低，防止执行器误动作。
 
 ## 核心特性
 
-*   **RISC-V + NPU 加速**：基于 SpaceMIT K1 NPU 运行量化 ONNX 模型，显著降低 CPU 负载。
+*   **RISC-V + NPU 加速**：基于 SpaceMIT K1 NPU ，利用 SpaceMITExecutionProvider 运行量化 ONNX 模型，显著降低 CPU 负载。
 *   **工业级控制逻辑**：PLC 逻辑与 AI 算法解耦，AI 仅负责“看”，PLC 负责“控”。
 *   **标准化接口**：对外暴露标准 Modbus TCP 接口，支持多客户端并发，便于接入上位机。
 *   **多模态反馈**：支持振动马达、LED、蜂鸣器等多种硬件反馈组合。
@@ -73,19 +76,11 @@
 *(该文档包含：硬件连接示意图、NPU 驱动检查、依赖安装及服务自启动配置等详细步骤)*
 
 详细的Modbus默认资源说明，请参阅文档：
- **[./plc_cpp/Modbus资源展示.md](./三端部署说明.md)**
+ **[./plc_cpp/Modbus资源展示.md](./plc_cpp/Modbus资源展示.md)**
 
-## 快速启动
-
-在完成环境配置后，可通过以下命令启动系统：
-
-```bash
-# 启动主程序 (自动拉起 PLC 和 Web 后端)
-python3 main.py
-```
-
-*   **Web 监控端**：访问 `http://<开发板IP>:5200`
-*   **Modbus 接口**：端口 `502`
+关于单独plc进程的说明：
+ **[./plc_cpp/README.md](./plc_cpp/README.md)**
+ 
 
 ## 许可证
 
