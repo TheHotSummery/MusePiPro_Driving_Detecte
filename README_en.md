@@ -127,7 +127,7 @@ For details on the standalone PLC process, refer to:
 
 ## License
 
-This project is licensed under **GPL-3.0**.
+This project is licensed under **MIT**.
 
 It is intended **for engineering research and prototype validation only**.
 
