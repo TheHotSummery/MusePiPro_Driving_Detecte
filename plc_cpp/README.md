@@ -313,7 +313,7 @@ systemctl list-unit-files --state=enabled | grep plc
 
 ## 许可证
 
-本项目为
+本项目为MIT License
 
 ---
 

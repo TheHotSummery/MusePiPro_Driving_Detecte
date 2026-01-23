@@ -2,7 +2,7 @@
 
 Muse Pi Pro 疲劳驾驶监测系统的后端服务V2，基于 Spring Boot 2.6.13 开发，提供数据接收、存储、分析和展示功能。
 
-请在 muse-backendv2\src\main\resources\application.properties  更新你的开发密钥
+请在 muse-backendv2\src\main\resources\application.properties  更新你的高德地图开发密钥
 
 
 ## 版本信息
@@ -16,7 +16,7 @@ Muse Pi Pro 疲劳驾驶监测系统的后端服务V2，基于 Spring Boot 2.6.1
 
 ## 许可证
 
-本项目为内部项目。
+MIT License
 
 ---
 
@@ -26,9 +26,7 @@ Muse Pi Pro 疲劳驾驶监测系统的后端服务V2，基于 Spring Boot 2.6.1
 - **项目地址**：https://gitee.com/achenjiayi/MusePiPro_Driving_Detecte
 - **Issues**：https://gitee.com/achenjiayi/MusePiPro_Driving_Detecte/issues
 
----
 
-**注意**：本文档会持续更新，请定期查看最新版本。
 
 
 
